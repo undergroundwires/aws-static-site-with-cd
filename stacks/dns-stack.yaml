@@ -1,0 +1,33 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Creates hosted zone
+
+Parameters:
+  RootDomainName:
+    Type: String
+    Description: The root (without www or https) DNS name of the website e.g. cloudarchitecture.io
+    AllowedPattern: (?!-)[a-zA-Z0-9-.]{1,63}(?<!-)
+    ConstraintDescription: Must be a valid root domain name
+
+Resources: # Keep resources minimal with no dependency as recreating hosted zone is problem (long DNS propogation time)
+  DNSHostedZone:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name: !Ref RootDomainName
+      HostedZoneConfig:
+        Comment: !Join ['', ['Hosted zone for ', !Ref RootDomainName]]
+      HostedZoneTags:
+        -
+          Key: Application
+          Value: !Ref RootDomainName
+
+Outputs:
+  
+  DNSHostedZoneNameServers:
+    Description: Name servers to update in domain registrar.
+    Value: !Join [' | ', !GetAtt DNSHostedZone.NameServers]
+ 
+  DNSHostedZoneId: # Used by web stack (cloudfront records) and certificate stack (for validation)
+    Description: The ID of the hosted zone that you want to create the record in.
+    Value: !Ref DNSHostedZone
+    Export:
+      Name: !Join [':', [ !Ref 'AWS::StackName', DNSHostedZoneId ]]
