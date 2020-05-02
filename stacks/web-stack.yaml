@@ -1,0 +1,279 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: |-
+  > Creates an S3 bucket configured for hosting a static webpage.
+  > Creates CloudFront distribution that has access to read the S3 bucket.
+
+Parameters:
+  RootDomainName:
+    Type: String
+    Description: The root DNS name of the website e.g. cloudarchitecture.io
+    AllowedPattern: (?!-)[a-zA-Z0-9-.]{1,63}(?<!-)
+    ConstraintDescription: Must be a valid root domain name
+  CertificateStackName:
+    Type: String
+    Description: Name of the certificate stack.
+  DnsStackName:
+    Type: String
+    Description: Name of the DNS stack.
+  404Page:
+    Description: The default page to redirect if the object does not exist in the bucket, e.g. "/404.html". Does not work with "UseDeepLinks".
+    Type: String
+    Default: ""
+  UseIndexHtmlRewriteLambda:
+    Description: Uses a lambda to rewrite CloudFront requests from url.com/test to url.com/test/index.html.
+    Default: true
+    Type: String
+    AllowedValues: [true, false]
+  UseDeepLinks:
+    Description: Use deep links for Single Page Applications with own router, e.g. Angular, Vue, React
+    Default: false
+    Type: String
+    AllowedValues: [true, false]
+  CloudFrontPriceClass:
+    Type: String
+    Description: The CloudFront distribution price class
+    Default: 'PriceClass_100'
+    AllowedValues: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-cloudfront-distribution-distributionconfig.html#cfn-cloudfront-distribution-distributionconfig-priceclass
+      - 'PriceClass_100'
+      - 'PriceClass_200'
+      - 'PriceClass_All'
+  MinimumProtocolVersion:
+    Type: String
+    Description: The CloudFront distribution price class
+    Default: 'TLSv1.2_2018'
+    AllowedValues: # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-cloudfront-distribution-viewercertificate.html#cfn-cloudfront-distribution-viewercertificate-minimumprotocolversion
+      - 'TLSv1' # Must be v1 or higher for sni-only SslSupportMethod
+      - 'TLSv1.1_2016'
+      - 'TLSv1.2_2018'
+      - 'TLSv1_2016'
+
+Conditions:
+  ShouldUseIndexHtmlRewriteLambda:
+    !Equals [true, !Ref UseIndexHtmlRewriteLambda]
+  ShouldUseDeepLinks:
+    !Equals [true, !Ref UseDeepLinks]
+  ShouldUse404Page: 
+    !Not [ !Equals [ !Ref 404Page, "" ] ]
+
+Resources:
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-${RootDomainName} # Must have stack name for IAM to allow
+      WebsiteConfiguration:
+        IndexDocument: index.html
+      CorsConfiguration:
+        # module scripts (and their imports) are fetched with CORS
+        CorsRules:
+          -
+            AllowedHeaders: [ '*' ]
+            AllowedMethods: [ GET ]
+            AllowedOrigins: 
+              - !Sub 'http://${RootDomainName}'
+              - !Sub 'http://www.${RootDomainName}'
+              - !Sub 'https://${RootDomainName}'
+              - !Sub 'https://www.${RootDomainName}'
+      Tags:
+        -
+          Key: Application
+          Value: !Ref RootDomainName    
+ 
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument: # Only used for CloudFront as it's the only way, otherwise use IAM roles in IAM stack.
+        Statement:
+          -
+            Sid: AllowCloudFrontGet
+            Action: s3:GetObject
+            Effect: Allow
+            Principal:
+                CanonicalUser: !GetAtt CloudFrontOriginAccessIdentity.S3CanonicalUserId
+            Resource: !Sub 'arn:aws:s3:::${S3Bucket}/*'
+          # We could give s3:ListBucket access to get 404 instead of 403 when an object is not found
+          # but as we only host static webpages, we don't need to give extra permission, we can just assume that all 403 is 404
+          # see CustomErrorResponses
+  
+  CloudFrontOriginAccessIdentity:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Sub 'CloudFront OAI for ${S3Bucket}'
+    
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: !Sub 'Cloudfront Distribution pointing to S3 bucket: ${S3Bucket}'
+        Origins:
+          -
+            DomainName: !GetAtt S3Bucket.DomainName #!Select [2, !Split ["/", !GetAtt S3Bucket.WebsiteURL]]
+            Id: S3Origin
+            S3OriginConfig:
+                OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}"
+        Enabled: true
+        HttpVersion: 'http2'
+        DefaultRootObject: index.html # Redirects rootdomain.com to rootdomain.com/index.html, does not work with subfolders.
+        Aliases:
+          - !Ref RootDomainName
+          - !Sub 'www.${RootDomainName}'
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          AllowedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          ForwardedValues:
+            QueryString: true
+            Cookies:
+              Forward: none
+          ViewerProtocolPolicy: redirect-to-https
+          LambdaFunctionAssociations:
+            !If
+            - ShouldUseIndexHtmlRewriteLambda
+            -
+              -
+                EventType: origin-request # Execute only when CF forwards a request to S3 origin. Does not execute if it's already cached.
+                LambdaFunctionARN: !Ref VersionedUrlRewriteLambda
+            - !Ref "AWS::NoValue"
+        PriceClass: !Ref CloudFrontPriceClass
+        ViewerCertificate:
+          AcmCertificateArn:
+            # Certificate must be validated before it can be used here
+            Fn::ImportValue: !Join [':', [!Ref CertificateStackName, CertificateArn]]
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: !Ref MinimumProtocolVersion
+        CustomErrorResponses:
+          !If
+          - ShouldUseDeepLinks
+          -
+            -
+              ErrorCode: 403 # As we don't give s3:ListBucket right in bucket policy for CloudFront, S3 will return 403 instead of 404
+              ResponseCode: 200
+              ResponsePagePath: /index.html
+          - !If
+            - ShouldUse404Page
+            -
+              -
+                ErrorCode: 403 # As we don't give s3:ListBucket right in bucket policy for CloudFront, S3 will return 403 instead of 404
+                ResponseCode: 404
+                ResponsePagePath: !Ref 404Page
+            - !Ref "AWS::NoValue"
+      Tags:
+        -
+          Key: Application
+          Value: !Ref RootDomainName
+
+  CloudFrontDNSRecords:
+    Type: AWS::Route53::RecordSetGroup
+    Properties: 
+      HostedZoneId:
+        Fn::ImportValue: !Join [':', [!Ref DnsStackName, DNSHostedZoneId]]
+      RecordSets:
+        # A records for IPv4
+        -
+          Name: !Ref RootDomainName
+          Type: A         
+          AliasTarget: 
+            DNSName: !GetAtt CloudFrontDistribution.DomainName
+            EvaluateTargetHealth: false
+            HostedZoneId: Z2FDTNDATAQYW2 # Static CloudFront distribution zone https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-route53-aliastarget.html#cfn-route53-aliastarget-hostedzoneid
+        -
+          Name: !Join ['', ['www.', !Ref RootDomainName]]
+          Type: A
+          AliasTarget: 
+            DNSName: !GetAtt CloudFrontDistribution.DomainName
+            EvaluateTargetHealth: false
+            HostedZoneId: Z2FDTNDATAQYW2 # Static CloudFront distribution zone https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-route53-aliastarget.html#cfn-route53-aliastarget-hostedzoneid
+        # AAAA records for IPv6
+        -
+          Name: !Ref RootDomainName
+          Type: AAAA        
+          AliasTarget: 
+            DNSName: !GetAtt CloudFrontDistribution.DomainName
+            EvaluateTargetHealth: false
+            HostedZoneId: Z2FDTNDATAQYW2 # Static CloudFront distribution zone https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-route53-aliastarget.html#cfn-route53-aliastarget-hostedzoneid
+        -
+          Name: !Join ['', ['www.', !Ref RootDomainName]]
+          Type: AAAA
+          AliasTarget: 
+            DNSName: !GetAtt CloudFrontDistribution.DomainName
+            EvaluateTargetHealth: false
+            HostedZoneId: Z2FDTNDATAQYW2 # Static CloudFront distribution zone https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-route53-aliastarget.html#cfn-route53-aliastarget-hostedzoneid
+
+  VersionedUrlRewriteLambda:
+    Type: 'AWS::Lambda::Version'
+    Condition: ShouldUseIndexHtmlRewriteLambda
+    Properties:
+      FunctionName: !Ref UrlRewriteLambda
+
+  UrlRewriteLambda:  # We use shorter names to allow longer stack names (stackname+rolename cannot reach 50 chars with managed names) & IAM rules work with stack prefix
+    Type: AWS::Lambda::Function
+    Condition: ShouldUseIndexHtmlRewriteLambda
+    Properties:
+      Description: Rewrites CloudFront requests from url.com/test to url.com/test/index.html.
+      FunctionName: !Sub ${AWS::StackName}-url-rewrite-lambda # StackName- required for role to function
+      Role: !GetAtt UrlRewriteLambdaRole.Arn
+      Runtime: nodejs12.x
+      Handler: index.handler
+      MemorySize: 128
+      Timeout: 5
+      Code:
+        ZipFile: |
+          'use strict';
+          const pointsToFile = uri => /\/[^/]+\.[^/]+$/.test(uri);
+          exports.handler = (event, context, callback) => {
+              let request = event.Records[0].cf.request; // Extract the request from the CloudFront event that is sent to Lambda@Edge
+              var oldUri = request.uri;
+            // Redirect redirects to urls with trailing slashes 
+              if (!pointsToFile(oldUri) && !oldUri.endsWith('/')) {
+                const newUri = request.querystring ? `${oldUri}/?${request.querystring}` : `${oldUri}/`;
+                return callback(null, {
+                  body: '',
+                  status: '301',
+                  statusDescription: 'Moved Permanently',
+                  headers: {
+                    location: [{
+                      key: 'Location',
+                      value: newUri,
+                    }],
+                  }
+                });
+              }
+              const newUri = oldUri.replace(/\/$/, '\/index.html'); // Match any '/' that occurs at the end of a URI. Replace it with a default index 
+              console.log("Old URI: " + oldUri);
+              console.log("New URI: " + newUri);
+              request.uri = newUri; // Replace the received URI with the URI that includes the index page
+              return callback(null, request); // Return to CloudFront
+          };
+      Tags: 
+        -
+          Key: Application
+          Value: !Ref RootDomainName
+        
+  UrlRewriteLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      Description: Execution role for UrlRewriteLambda
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - 'lambda.amazonaws.com'
+            - 'edgelambda.amazonaws.com'
+          Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+      - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+
+Outputs:
+  CloudFrontDistributionArn:  # Used by deployment script to be able to deploy to right S3 bucket
+    Description: Tthe Amazon Resource Name (ARN) of the CloudFront distribution.
+    Value: !Ref CloudFrontDistribution
+  S3BucketName: # Used by deployment script to be able to deploy to right S3 bucket
+    Description: Name of the S3 bucket.
+    Value: !Ref S3Bucket

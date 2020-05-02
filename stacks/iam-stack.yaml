@@ -1,0 +1,551 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |-
+  > Deploys the identity management for the deployment
+
+Parameters:
+  RootDomainName:
+    Type: String
+    Description: The root (without www or https) DNS name of the website e.g. cloudarchitecture.io
+    AllowedPattern: (?!-)[a-zA-Z0-9-.]{1,63}(?<!-)
+    ConstraintDescription: Must be a valid root domain name
+  WebStackName:
+    Type: String
+    Description: Name of the web stack, e.g. namethatsnotlonger-web-stack.
+  DnsStackName:
+    Type: String
+    Description: Name of the DNS stack, e.g. namethatsnotlonger-dns-stack.
+  CertificateStackName:
+    Type: String
+    Description: Name of the certificate stack, e.g. namethatsnotlonger-cert-stack.
+
+Resources: # Granularity cheatsheet: https://iam.cloudonaut.io/
+
+  # -----------------------------
+  # ------ User & Groups --------
+  # -----------------------------
+  DeploymentGroup:
+    Type: AWS::IAM::Group
+    Properties: 
+      # GroupName: No hardcoded naming because of easier CloudFormation management
+      ManagedPolicyArns:
+        - !Ref AllowValidateTemplatePolicy
+  
+  DeploymentUser:
+    Type: AWS::IAM::User
+    Properties:
+    #   # UserName: No hardcoded naming because of easier CloudFormation management
+    #   # Policies: Assing policies on group level
+      Tags:
+        -
+          Key: Application
+          Value: !Ref RootDomainName
+
+  AddDeploymentUserToDeploymentGroup:
+    Type: AWS::IAM::UserToGroupAddition
+    Properties:
+      GroupName: !Ref DeploymentGroup
+      Users:
+        - !Ref DeploymentUser
+
+  # -----------------------------
+  # ----------- Roles -----------
+  # -----------------------------
+  IamStackDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Allows to deploy IAM stack
+      AssumeRolePolicyDocument:
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt DeploymentUser.Arn
+            Action: sts:AssumeRole
+      Tags:
+        -
+          Key: Application
+          Value: !Ref RootDomainName
+      ManagedPolicyArns: 
+        - !Ref CloudFormationDeployPolicy
+        - !Ref PolicyDeployPolicy
+        - !Ref IamStackDeployPolicy
+
+  CertStackDeployRole:  # We use shorter name ("cert") to allow longer stack names (stackname+rolename cannot reach 50 chars with managed names) & IAM rules work with stack prefix
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Allows to deploy certificate stack
+      AssumeRolePolicyDocument:
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt DeploymentUser.Arn
+            Action: sts:AssumeRole
+      Tags:
+        -
+          Key: Application
+          Value: !Ref RootDomainName
+      ManagedPolicyArns: 
+        - !Ref CloudFormationDeployPolicy
+        - !Ref LambdaBackedCustomResourceDeployPolicy
+        - !Ref RecordSetUpdatePolicy
+
+  DnsStackDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Allows to deploy DNS stack
+      AssumeRolePolicyDocument:
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt DeploymentUser.Arn
+            Action: sts:AssumeRole
+      Tags:
+        -
+          Key: Application
+          Value: !Ref RootDomainName
+      ManagedPolicyArns: 
+        - !Ref CloudFormationDeployPolicy
+        - !Ref DnsStackDeployPolicy
+
+  WebStackDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Allows to deploy web stack
+      AssumeRolePolicyDocument:
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt DeploymentUser.Arn
+            Action: sts:AssumeRole
+      Tags:
+        -
+          Key: Application
+          Value: !Ref RootDomainName
+      ManagedPolicyArns: 
+        - !Ref CloudFormationDeployPolicy
+        - !Ref WebStackDeployPolicy
+        - !Ref WebStackLambdaEdgeDeployPolicy
+        - !Ref RecordSetUpdatePolicy
+
+  S3AppDeployRole:
+      Type: 'AWS::IAM::Role'
+      Properties:
+        Description: "Allows to deploy website to S3"
+        AssumeRolePolicyDocument:
+          Statement:
+            -
+              Effect: Allow
+              Principal:
+                AWS: !GetAtt DeploymentUser.Arn
+              Action: sts:AssumeRole
+        Tags:
+          -
+            Key: Application
+            Value: !Ref RootDomainName
+        ManagedPolicyArns:
+          - !Ref S3SiteDeployPolicy
+          - !Ref StackExportReaderPolicy
+
+  CFAppDeployRole: # We use shorter name ("CF") to allow longer stack names (stackname+rolename cannot reach 50 chars with managed names) & IAM rules work with stack prefix
+      Type: 'AWS::IAM::Role'
+      Properties:
+        Description: "Allows to informs to CloudFront to renew its cache from S3"
+        AssumeRolePolicyDocument:
+          Statement:
+            -
+              Effect: Allow
+              Principal:
+                AWS: !GetAtt DeploymentUser.Arn
+              Action: sts:AssumeRole
+        Tags:
+          -
+            Key: Application
+            Value: !Ref RootDomainName
+        ManagedPolicyArns:
+          - !Ref CloudFrontInvalidationPolicy
+          - !Ref StackExportReaderPolicy
+
+  # --------------------------------
+  # ----------- Policies -----------
+  # --------------------------------
+
+  AllowValidateTemplatePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: "No read & writes to resources, reveals just basic CloudFormation API to be used for validating templates"
+      # ManagedPolicyName: No hardcoded naming because of easier CloudFormation management
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Sid: AllowCloudFormationTemplateValidation
+            Effect: Allow
+            Action:
+              - cloudformation:ValidateTemplate
+            Resource: '*' # Cannot be specified
+
+  CloudFormationDeployPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: "Allows deploying CloudFormation using CLI command 'aws cloudformation deploy' (with change sets)"
+      # ManagedPolicyName: No hardcoded naming because of easier CloudFormation management
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Sid: AllowCloudFormationStackOperations
+            Effect: Allow
+            Action:
+              - cloudformation:GetTemplateSummary
+              - cloudformation:DescribeStacks
+              - cloudformation:CreateChangeSet
+              - cloudformation:ExecuteChangeSet
+              - cloudformation:DescribeChangeSet
+            Resource:
+              - !Sub arn:aws:cloudformation:*:${AWS::AccountId}:stack/${WebStackName}/*
+              - !Sub arn:aws:cloudformation:*:${AWS::AccountId}:stack/${WebStackName}-extend/*
+              - !Sub arn:aws:cloudformation:*:${AWS::AccountId}:stack/${DnsStackName}/*
+              - !Sub arn:aws:cloudformation:*:${AWS::AccountId}:stack/${AWS::StackName}/*
+              - !Sub arn:aws:cloudformation:*:${AWS::AccountId}:stack/${CertificateStackName}/*
+
+  IamStackDeployPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: !Sub Allows deploying ${AWS::StackName}
+      # ManagedPolicyName: No hardcoded naming because of easier CloudFormation management
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Sid: AllowUserArnExport
+            Effect: Allow
+            Action:
+              - iam:GetUser
+            Resource:
+              - !GetAtt DeploymentUser.Arn # arn:aws:iam::$account:user/$user-name
+          -
+            Sid: AllowTagging
+            Effect: Allow
+            Action:
+              - iam:TagResource
+            Resource:
+              - !Sub arn:aws:cloudformation::${AWS::AccountId}:stack/${AWS::StackName}/*
+              - !GetAtt DeploymentUser.Arn
+          -
+            Sid: AllowRoleDeployment
+            Effect: Allow
+            Action:
+              - iam:CreateRole
+              - iam:DeleteRole
+            Resource:
+              - !Sub arn:aws:iam::${AWS::AccountId}:role/${AWS::StackName}-* # arn:aws:iam::$account:role/$role-name
+
+  LambdaBackedCustomResourceDeployPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: !Sub Allows deploying a lambda-backed custom resource in ${CertificateStackName}
+      # ManagedPolicyName: # ManagedPolicyName: No hardcoded naming because of easier CloudFormation management
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Sid: AllowLambdaDeployment
+            Effect: Allow
+            Action:
+              - lambda:GetFunction
+              - lambda:DeleteFunction
+              - lambda:CreateFunction
+              - lambda:GetFunctionConfiguration
+              - lambda:InvokeFunction
+              - lambda:ListTags
+              - lambda:TagResource
+              - lambda:UntagResource
+            Resource:
+              - !Sub arn:aws:lambda:*:${AWS::AccountId}:function:${CertificateStackName}-* # arn:aws:lambda:$region:$account:function:$function-name
+          -
+            Sid: AllowLambdaInvoke
+            Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource:
+              - !Sub arn:aws:lambda:*:${AWS::AccountId}:function:${CertificateStackName}-* # arn:aws:lambda:$region:$account:function:$function-name
+          -
+            Sid: AllowLambdaRoleDeployment # So lambda execution role can be deployed & we can add policies on role
+            Effect: Allow
+            Action:
+              - iam:CreateRole
+              - iam:DeleteRole
+              - iam:PassRole
+              - iam:AttachRolePolicy
+              - iam:DetachRolePolicy
+              - iam:GetRole
+            Resource:
+              - !Sub arn:aws:iam::${AWS::AccountId}:role/${CertificateStackName}-* # arn:aws:iam::$account:role/$role-name
+          -
+            Sid: AllowPolicyUpdates
+            Effect: Allow
+            Action:
+              - iam:ListPolicyVersions
+              - iam:CreatePolicyVersion
+              - iam:DeletePolicyVersion
+              - iam:CreatePolicy 
+              - iam:DeletePolicy 
+              - iam:GetPolicy
+            Resource:
+              - !Sub arn:aws:iam::${AWS::AccountId}:policy/${CertificateStackName}-* # when ManagedPolicyName is not given policies get name like StackName-*
+
+  PolicyDeployPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: !Sub Allows deployment of policies in ${AWS::StackName}
+      # ManagedPolicyName: Commented out because CloudFormation requires to rename when replacing custom-named resource
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Sid: AllowPolicyUpdates
+            Effect: Allow
+            Action:
+              - iam:ListPolicyVersions
+              - iam:CreatePolicyVersion
+              - iam:DeletePolicyVersion
+              - iam:CreatePolicy 
+              - iam:DeletePolicy 
+              - iam:GetPolicy
+            Resource:
+              - !Sub arn:aws:iam::${AWS::AccountId}:policy/${AWS::StackName}-* # when ManagedPolicyName is not given policies get name like StackName-*
+          -
+            Sid: AllowPoliciesOnRoles
+            Effect: Allow
+            Action:
+              - iam:AttachRolePolicy
+              - iam:DetachRolePolicy
+              - iam:GetRole
+            Resource:
+              - !Sub arn:aws:iam::${AWS::AccountId}:role/${AWS::StackName}-* # arn:aws:iam::$account:role/$role-name
+          - 
+            Sid: AllowPolicyAssigmentToGroup
+            Effect: Allow
+            Action:
+              - iam:AttachGroupPolicy
+              - iam:DetachGroupPolicy
+            Resource:
+              - !GetAtt DeploymentGroup.Arn # arn:aws:iam::$account:group/$group-name
+          - 
+            Sid: AllowGettingGroupInformation
+            Effect: Allow
+            Action:
+              - iam:GetGroup
+            Resource:
+              - !GetAtt DeploymentGroup.Arn # arn:aws:iam::$account:group/$group-name
+
+  DnsStackDeployPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: !Sub Allows deployment of ${CertificateStackName}
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Sid: AllowHostedZoneDeployment
+            Effect: Allow
+            Action:
+              - route53:CreateHostedZone
+              - route53:ListQueryLoggingConfigs
+              - route53:DeleteHostedZone
+              - route53:GetChange
+              - route53:ChangeTagsForResource
+              - route53:GetHostedZone
+            Resource: '*' # Does not support resource-level permissions https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/access-control-overview.html#access-control-manage-access-intro-resource-policies
+          
+  WebStackDeployPolicy:
+    # We need a role to run s3:PutBucketPolicy, IAM users cannot run it. See https://stackoverflow.com/a/48551383 
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: !Sub Allows deployment of resources in ${WebStackName}
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Sid: AllowCloudFrontOAIDeployment
+            Effect: Allow
+            Action:
+              - cloudfront:GetCloudFrontOriginAccessIdentity
+              - cloudfront:CreateCloudFrontOriginAccessIdentity
+              - cloudfront:GetCloudFrontOriginAccessIdentityConfig
+              - cloudfront:DeleteCloudFrontOriginAccessIdentity
+            Resource: '*' # Does not support resource-level permissions https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/cf-api-permissions-ref.html
+          -
+            Sid: AllowCloudFrontDistributionDeployment
+            Effect: Allow
+            Action:
+              - cloudfront:CreateDistribution
+              - cloudfront:DeleteDistribution
+              - cloudfront:UpdateDistribution
+              - cloudfront:GetDistribution
+              - cloudfront:TagResource
+              - cloudfront:UpdateCloudFrontOriginAccessIdentity
+            Resource: !Sub arn:aws:cloudfront::${AWS::AccountId}:* # arn:aws:cloudfront::$account-id:*
+          -
+            Sid: AllowS3BucketPolicyAccess
+            Effect: Allow
+            Action:
+              - s3:CreateBucket
+              - s3:DeleteBucket
+              - s3:PutBucketWebsite
+              - s3:DeleteBucketPolicy
+              - s3:PutBucketPolicy
+              - s3:GetBucketPolicy
+              - s3:PutBucketCORS
+              - s3:DeleteBucketCORS
+            Resource: !Sub arn:aws:s3:::${WebStackName}* # arn:aws:s3:::$bucket-name
+
+  WebStackLambdaEdgeDeployPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: !Sub Allows deployment of lambda @Edge in ${WebStackName}
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Sid: AllowLambdaRoleDeployment # So lambda execution role can be deployed & we can add policies on role
+            Effect: Allow
+            Action:
+              - iam:CreateRole
+              - iam:DeleteRole
+              - iam:PassRole
+              - iam:AttachRolePolicy
+              - iam:DetachRolePolicy
+              - iam:GetRole
+            Resource:
+              - !Sub arn:aws:iam::${AWS::AccountId}:role/${WebStackName}-* # arn:aws:iam::$account:role/$role-name
+          -
+            Sid: AllowLambdaDeployment
+            Effect: Allow
+            Action:
+              - lambda:GetFunction
+              - lambda:DeleteFunction
+              - lambda:CreateFunction
+              - lambda:GetFunctionConfiguration
+              - lambda:ListTags
+              - lambda:TagResource
+              - lambda:UntagResource
+            Resource:
+              - !Sub arn:aws:lambda:*:${AWS::AccountId}:function:${WebStackName}-* # arn:aws:lambda:$region:$account:function:$function-name
+          -
+            Sid: AllowAssigningLambdaToCloudFront
+            Effect: Allow
+            Action:
+              - lambda:EnableReplication*  # https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-edge-permissions.html#lambda-edge-permissions-required
+              - lambda:ListVersionsByFunction # we cannot assign lambdas, we must assign versions
+              - lambda:PublishVersion # we cannot assign lambdas, we must assign versions
+            Resource: !Sub arn:aws:lambda:*:${AWS::AccountId}:function:${WebStackName}-*  # arn:aws:lambda:$region:$account:function:$function-name
+          -
+            Sid: AllowCreatingServiceLinkedRoles # https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-edge-permissions.html#lambda-edge-permissions-required
+            Effect: Allow
+            Action:
+              - iam:CreateServiceLinkedRole
+              - iam:DeleteServiceLinkedRole
+            Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/aws-service-role/*
+            Condition:
+              StringLike: 
+                iam:AWSServiceName:
+                  - replicator.lambda.amazonaws.com
+                  - logger.cloudfront.amazonaws.com
+  
+  RecordSetUpdatePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Allows you to update records on Route 53.
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Sid: AllowRecordDeploymentToRoute53
+            Effect: Allow
+            Action:
+              - route53:GetHostedZone
+              - route53:ChangeResourceRecordSets
+              - route53:GetChange
+              - route53:ListResourceRecordSets
+            Resource: '*' # Does not support resource-level permissions https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/access-control-overview.html#access-control-manage-access-intro-resource-policies
+
+  S3SiteDeployPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: !Sub Allows for listing buckets in ${WebStackName} to be able to list objects in a bucket
+      # ManagedPolicyName: Commented out because CloudFormation requires to rename when replacing custom-named resources
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Sid: AllowListingObjects
+            Effect: Allow
+            Action:
+              - s3:ListBucket # To allow ListObjectsV2
+            Resource: !Sub arn:aws:s3:::${WebStackName}* # arn:aws:s3:::$bucket-name
+          -
+            Sid: AllowUpdatingObjects
+            Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:DeleteObject
+            Resource: !Sub arn:aws:s3:::${WebStackName}*/* # arn:aws:s3:::$bucket-name/$key-name
+
+  CloudFrontInvalidationPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Allows creating invalidations on CloudFront
+      # ManagedPolicyName: Commented out because CloudFormation requires to rename when replacing custom-named resource
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Sid: AllowCloudFrontInvalidations
+            Effect: Allow
+            Action:
+              - cloudfront:CreateInvalidation
+            Resource: "*" # Does not support resource-level permissions https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/cf-api-permissions-ref.html
+
+  StackExportReaderPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: !Sub allows creating invalidations on CloudFront in ${WebStackName}
+      # ManagedPolicyName: Commented out because CloudFormation requires to rename when replacing custom-named resource
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Sid: AllowGettingBucketName
+            Effect: Allow
+            Action:
+              - cloudformation:DescribeStacks
+            Resource: !Sub arn:aws:cloudformation:*:${AWS::AccountId}:stack/${WebStackName}/* # arn:aws:cloudformation:$region:$account:stack/$stack-name/*
+    
+Outputs:
+  CertStackDeployRoleArn: # To be used by the deploy tool
+    Description: "Secret name: AWS_CERTIFICATE_STACK_DEPLOYMENT_ROLE_ARN"
+    Value: !GetAtt CertStackDeployRole.Arn
+
+  DnsStackDeployRoleArn:  # To be used by the deploy tool
+    Description: "Secret name: AWS_DNS_STACK_DEPLOYMENT_ROLE_ARN"
+    Value: !GetAtt DnsStackDeployRole.Arn
+
+  IamStackDeployRoleArn:  # To be used by the deploy tool
+    Description: "Secret name: AWS_IAM_STACK_DEPLOYMENT_ROLE_ARN"
+    Value: !GetAtt IamStackDeployRole.Arn
+
+  WebStackDeployRoleArn:  # To be used by the deploy tool
+    Description: "Secret name: AWS_WEB_STACK_DEPLOYMENT_ROLE_ARN"
+    Value: !GetAtt WebStackDeployRole.Arn
+
+  S3AppDeployRoleArn:  # To be used by the deploy tool
+    Description: "Secret name: AWS_S3_SITE_DEPLOYMENT_ROLE_ARN"
+    Value: !GetAtt S3AppDeployRole.Arn
+
+  CFAppDeployRoleArn:  # To be used by the deploy tool
+    Description: "Secret name: AWS_CLOUDFRONT_SITE_DEPLOYMENT_ROLE_ARN"
+    Value: !GetAtt CFAppDeployRole.Arn

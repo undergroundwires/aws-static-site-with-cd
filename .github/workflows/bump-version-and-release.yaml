@@ -1,0 +1,16 @@
+name: Bump version & release
+
+on:
+  push:
+    branches:
+    - master
+
+jobs:
+
+  bump-version-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - 
+        uses: undergroundwires/bump-everywhere@master
+        with:
+          user: undergroundwires-bot
