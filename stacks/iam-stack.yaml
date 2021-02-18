@@ -359,6 +359,7 @@ Resources: # Granularity cheatsheet: https://iam.cloudonaut.io/
               - route53:GetChange
               - route53:ChangeTagsForResource
               - route53:GetHostedZone
+              - route53:ListTagsForResource
             Resource: '*' # Does not support resource-level permissions https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/access-control-overview.html#access-control-manage-access-intro-resource-policies
           
   WebStackDeployPolicy:
@@ -390,7 +391,7 @@ Resources: # Granularity cheatsheet: https://iam.cloudonaut.io/
               - cloudfront:UpdateCloudFrontOriginAccessIdentity
             Resource: !Sub arn:aws:cloudfront::${AWS::AccountId}:* # arn:aws:cloudfront::$account-id:*
           -
-            Sid: AllowS3BucketPolicyAccess
+            Sid: AllowS3BucketAccess
             Effect: Allow
             Action:
               - s3:CreateBucket
@@ -401,6 +402,7 @@ Resources: # Granularity cheatsheet: https://iam.cloudonaut.io/
               - s3:GetBucketPolicy
               - s3:PutBucketCORS
               - s3:DeleteBucketCORS
+              - s3:PutBucketTagging
             Resource: !Sub arn:aws:s3:::${WebStackName}* # arn:aws:s3:::$bucket-name
 
   WebStackLambdaEdgeDeployPolicy:
