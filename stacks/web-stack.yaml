@@ -217,7 +217,7 @@ Resources:
       Description: Rewrites CloudFront requests from url.com/test to url.com/test/index.html.
       FunctionName: !Sub ${AWS::StackName}-url-rewrite-lambda # StackName- required for role to function
       Role: !GetAtt UrlRewriteLambdaRole.Arn
-      Runtime: nodejs12.x
+      Runtime: nodejs20.x
       Handler: index.handler
       MemorySize: 128
       Timeout: 5
