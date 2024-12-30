@@ -300,10 +300,25 @@ Vulnerability scans runs also periodically each month to check against latest kn
   - It's defaulted to cheapest `PriceClass_100`, for other allowed values check [AWS documentation](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-cloudfront-distribution-distributionconfig.html#cfn-cloudfront-distribution-distributionconfig-priceclass).
 - Parameters:
 
-  - **`UseIndexHtmlRewriteLambda`**
+  - **`UseIndexHtmlRewrite`**
     - **Allowed Values :** `true`, `false`
     - **Default Value :**  `true`
-    - **Description :** Enables [default directory indexing](#default-directory-indexes)
+    - **Description :** Looks for `index.html` file at given URL, provides [default directory indexing](#default-directory-indexes)
+  - **`ForceRemoveTrailingSlash`**
+    - **Allowed Values :** `true`, `false`
+    - **Default Value :**  `true`
+    - **Description :**
+      - Redirects requests with trailing slash to URLs without trailing slash
+      - Example: `/about/` is redirected to `/about`
+      - 💡 This can be helpful for SEO management due to consistency it provides.
+  - **`ForceTrailingSlash`**
+    - **Allowed Values :** `true`, `false`
+    - **Default Value :**  `true`
+    - **Description :**
+      - Redirects requests without trailing slash to URLs with trailing slash.
+      - Example: `/about` is redirected to `/about/`
+      - 💡 This can be good for SEO management due to consistency it provides.
+      - 💡 Consider `ForceRemoveTrailingSlash` for simplicity.
   - **`UseDeepLinks`**
     - **Allowed Values :** `true`, `false`
     - **Default Value :**  `false`
@@ -331,8 +346,8 @@ Vulnerability scans runs also periodically each month to check against latest kn
 ##### Default directory indexes
 
 - **Problem**
-  - CloudFront can redirect  `test.com` to `test.com/index.html`
-    - 4 it does not work on subfolders e.g. `test.com/hello/` to `test.com/hello/index.html`
+  - CloudFront can redirect `test.com` to `test.com/index.html`
+    - But it does not work on subfolders e.g. `test.com/hello/` to `test.com/hello/index.html`
   - AWS static websites can redirect `test.com/folder/` to `test.com/folder.html`
     - However it does not work with HTTPS, and only support HTTP.
     - We don't want bucket to be publicly accessible, and HTTP does not work with `CloudFront Origin Access Identity`
@@ -345,6 +360,7 @@ Vulnerability scans runs also periodically each month to check against latest kn
       - e.g. `test.com/folder` to `test.com/folder/`
     - It creates new URL by replacing any '/' that occurs at the end of a URI with `index.html`.
       - e.g. `test.com/folder` to `test.com/folder/index.html`.
+    - See more: [Related blog post](https://aws.amazon.com/blogs/compute/implementing-default-directory-indexes-in-amazon-s3-backed-amazon-cloudfront-origins-using-lambdaedge/)
   - 💰 It's almost free. [AWS Pricing](https://aws.amazon.com/lambda/pricing/):
     - $0.60 per 1 million requests ($0.0000006 per request)
     - $0.00000625125 for every 128MB-second
