@@ -20,10 +20,28 @@ Parameters:
     Description: The default page to redirect if the object does not exist in the bucket, e.g. "/404.html". Does not work with "UseDeepLinks".
     Type: String
     Default: ""
-  UseIndexHtmlRewriteLambda:
-    Description: Uses a lambda to rewrite CloudFront requests from url.com/test to url.com/test/index.html.
+  UseIndexHtmlRewrite:
+    Description: >-
+      Enables rewriting of directory requests to their index.html files.
+      Example: `/about/` to `/about/index.html`.
     Default: true
     Type: String
+    AllowedValues: [true, false]
+  ForceRemoveTrailingSlash:
+    Description: >-
+      Forces removal of trailing slashes in URLs.
+      Example: `/about/` redirects to `/about`
+      It cannot be `true` if `ForceTrailingSlash` is `true`.
+    Type: String
+    Default: false
+    AllowedValues: [true, false]
+  ForceTrailingSlash:
+    Description: >-
+      Forces addition of trailing slashes in URLs.
+      Example: `/about` redirects to `/about/`
+      It cannot be `true` if `ForceRemoveTrailingSlash` is `true`.
+    Type: String
+    Default: false
     AllowedValues: [true, false]
   UseDeepLinks:
     Description: Use deep links for Single Page Applications with own router, e.g. Angular, Vue, React
@@ -48,9 +66,23 @@ Parameters:
       - 'TLSv1.2_2018'
       - 'TLSv1_2016'
 
+Rules:
+  MutuallyExclusiveSlashBehavior:
+    Assertions:
+      - Assert: !Not [!And
+          - !Equals ["true", !Ref ForceRemoveTrailingSlash]
+          - !Equals ["true", !Ref ForceTrailingSlash]
+        ]
+        AssertDescription: >
+          ForceRemoveTrailingSlash and ForceTrailingSlash cannot both be set to true.
+          Please enable only one of these options.
+
 Conditions:
-  ShouldUseIndexHtmlRewriteLambda:
-    !Equals [true, !Ref UseIndexHtmlRewriteLambda]
+  ShouldUseRequestModifierLambda:
+    !Or 
+      - !Equals [true, !Ref UseIndexHtmlRewrite]
+      - !Equals [true, !Ref ForceRemoveTrailingSlash]
+      - !Equals [true, !Ref ForceTrailingSlash]
   ShouldUseDeepLinks:
     !Equals [true, !Ref UseDeepLinks]
   ShouldUse404Page: 
@@ -133,7 +165,7 @@ Resources:
           ViewerProtocolPolicy: redirect-to-https
           LambdaFunctionAssociations:
             !If
-            - ShouldUseIndexHtmlRewriteLambda
+            - ShouldUseRequestModifierLambda
             -
               -
                 EventType: origin-request # Execute only when CF forwards a request to S3 origin. Does not execute if it's already cached.
@@ -206,48 +238,106 @@ Resources:
 
   VersionedUrlRewriteLambda:
     Type: 'AWS::Lambda::Version'
-    Condition: ShouldUseIndexHtmlRewriteLambda
+    Condition: ShouldUseRequestModifierLambda
     Properties:
       FunctionName: !Ref UrlRewriteLambda
 
   UrlRewriteLambda:  # We use shorter names to allow longer stack names (stackname+rolename cannot reach 50 chars with managed names) & IAM rules work with stack prefix
     Type: AWS::Lambda::Function
-    Condition: ShouldUseIndexHtmlRewriteLambda
+    Condition: ShouldUseRequestModifierLambda
     Properties:
-      Description: Rewrites CloudFront requests from url.com/test to url.com/test/index.html.
-      FunctionName: !Sub ${AWS::StackName}-url-rewrite-lambda # StackName- required for role to function
+      Description: >-
+        If enabled, rewrites CloudFront requests from `url.com/test` to `url.com/test/index.html`.
+        If enabled, shows `301` for trailing slashes to ensure consistency.
+      FunctionName: !Sub ${AWS::StackName}-url-modifier-lambda # StackName- required for role to function
       Role: !GetAtt UrlRewriteLambdaRole.Arn
       Runtime: nodejs20.x
       Handler: index.handler
       MemorySize: 128
       Timeout: 5
+      Environment:
+        Variables:
+          FORCE_TRAILING_SLASH: !Ref ForceTrailingSlash
+          FORCE_REMOVE_TRAILING_SLASH: !Ref ForceRemoveTrailingSlash
+          REWRITE_WITH_INDEX_HTML: !Ref UseIndexHtmlRewrite
       Code:
         ZipFile: |
           'use strict';
-          const pointsToFile = uri => /\/[^/]+\.[^/]+$/.test(uri);
-          exports.handler = (event, context, callback) => {
-              let request = event.Records[0].cf.request; // Extract the request from the CloudFront event that is sent to Lambda@Edge
-              var oldUri = request.uri;
-            // Redirect redirects to urls with trailing slashes 
-              if (!pointsToFile(oldUri) && !oldUri.endsWith('/')) {
-                const newUri = request.querystring ? `${oldUri}/?${request.querystring}` : `${oldUri}/`;
-                return callback(null, {
-                  body: '',
-                  status: '301',
-                  statusDescription: 'Moved Permanently',
-                  headers: {
-                    location: [{
-                      key: 'Location',
-                      value: newUri,
-                    }],
-                  }
-                });
+
+          const readEnvBool = (variableName) => process.env[variableName] === 'true';
+          const options = {
+            shouldForceTrailingSlash: readEnvBool('FORCE_TRAILING_SLASH'),
+            shouldRemoveTrailingSlash: readEnvBool('FORCE_REMOVE_TRAILING_SLASH'),
+            shouldRewriteWithIndexHtml: readEnvBool('REWRITE_WITH_INDEX_HTML'),
+          };
+          if (
+            options.shouldForceTrailingSlash
+            && options.shouldRemoveTrailingSlash
+          ) {
+            throw new Error('Conflicting options: Mutually exclusive slash behavior');
+          }
+          if (
+            !options.shouldForceTrailingSlash
+            && !options.shouldRemoveTrailingSlash
+            && !options.shouldRewriteWithIndexHtml
+          ) {
+            throw new Error('All options are false. No action needed.');
+          }
+
+          const pointsToFile = (uri) => /\/[^/]+\.[^/]+$/.test(uri);
+          exports.handler = (event, _context, callback) => {
+            console.log('Handling request. Options:', options);
+
+            const request = event.Records[0].cf.request; // Request to CloudFront
+            const requestUri = request.uri;
+
+            const redirectResult = (newUri) => callback(null, {
+              body: '',
+              status: '301',
+              statusDescription: 'Moved Permanently',
+              headers: {
+                location: [{
+                  key: 'Location',
+                  value: newUri,
+                }],
               }
-              const newUri = oldUri.replace(/\/$/, '\/index.html'); // Match any '/' that occurs at the end of a URI. Replace it with a default index 
-              console.log("Old URI: " + oldUri);
-              console.log("New URI: " + newUri);
-              request.uri = newUri; // Replace the received URI with the URI that includes the index page
-              return callback(null, request); // Return to CloudFront
+            });
+
+            const addQueryString = (uri) => request.querystring
+              ? `${uri}?${request.querystring}`
+              : uri;
+
+            if (
+              options.shouldForceTrailingSlash
+              && !pointsToFile(requestUri)
+              && !requestUri.endsWith('/')) {
+              return redirectResult(addQueryString(
+                `${requestUri}/` // Add trailing slash
+              ));
+            }
+
+            if (
+              options.shouldRemoveTrailingSlash
+                && requestUri.endsWith('/')
+            ) {
+              return redirectResult(addQueryString(
+                requestUri.slice(0, -1) // Remove trailing slash
+              ));
+            }
+
+            if (
+              options.shouldRewriteWithIndexHtml
+                && (requestUri.endsWith('/') || !pointsToFile(requestUri))
+            ) {
+              const newUri = requestUri.endsWith('/')
+                ? `${requestUri}index.html`
+                : `${requestUri}/index.html`;
+              console.log(`URI rewrite. New: ${newUri}, original: ${requestUri}`);
+              request.uri = newUri;
+              return callback(null, request); // Return with index.html
+            }
+
+            return callback(null, request); // Return unmodified
           };
       Tags: 
         -
