@@ -17,13 +17,40 @@ Parameters:
     Type: String
     Description: Name of the DNS stack.
   404Page:
-    Description: The default page to redirect if the object does not exist in the bucket, e.g. "/404.html". Does not work with "UseDeepLinks".
+    Description: >
+      The default page to redirect if the object does not exist in the bucket, e.g. "/404.html".
+      Does not work with "UseDeepLinks".
     Type: String
     Default: ""
-  UseIndexHtmlRewriteLambda:
-    Description: Uses a lambda to rewrite CloudFront requests from url.com/test to url.com/test/index.html.
+  UseIndexHtmlRewrite:
+    Description: >-
+      Enables rewriting of directory requests to their `index.html` files.
+      Example: `/about/` to `/about/index.html`.
     Default: true
     Type: String
+    AllowedValues: [true, false]
+  UsePathHtmlRewrite:
+    Description: >-
+      Enables rewriting of path requests to as request to `.html` files.
+      Example: `/about` to `/about.html`.
+    Default: false
+    Type: String
+    AllowedValues: [true, false]
+  ForceRemoveTrailingSlash:
+    Description: >-
+      Forces removal of trailing slashes in URLs.
+      Example: `/about/` redirects to `/about`
+      It cannot be `true` if `ForceTrailingSlash` is `true`.
+    Type: String
+    Default: false
+    AllowedValues: [true, false]
+  ForceTrailingSlash:
+    Description: >-
+      Forces addition of trailing slashes in URLs.
+      Example: `/about` redirects to `/about/`
+      It cannot be `true` if `ForceRemoveTrailingSlash` is `true`.
+    Type: String
+    Default: false
     AllowedValues: [true, false]
   UseDeepLinks:
     Description: Use deep links for Single Page Applications with own router, e.g. Angular, Vue, React
@@ -48,9 +75,24 @@ Parameters:
       - 'TLSv1.2_2018'
       - 'TLSv1_2016'
 
+Rules:
+  MutuallyExclusiveSlashBehavior:
+    Assertions:
+      - Assert: !Not 
+          - !And
+            - !Equals ["true", !Ref ForceRemoveTrailingSlash]
+            - !Equals ["true", !Ref ForceTrailingSlash]
+        AssertDescription: >
+          ForceRemoveTrailingSlash and ForceTrailingSlash cannot both be set to true.
+          Please enable only one of these options.
+
 Conditions:
-  ShouldUseIndexHtmlRewriteLambda:
-    !Equals [true, !Ref UseIndexHtmlRewriteLambda]
+  ShouldUseSiteRequestHandlerLambda:
+    !Or 
+      - !Equals [true, !Ref UseIndexHtmlRewrite]
+      - !Equals [true, !Ref ForceRemoveTrailingSlash]
+      - !Equals [true, !Ref ForceTrailingSlash]
+      - !Equals [true, !Ref UsePathHtmlRewrite]
   ShouldUseDeepLinks:
     !Equals [true, !Ref UseDeepLinks]
   ShouldUse404Page: 
@@ -133,11 +175,11 @@ Resources:
           ViewerProtocolPolicy: redirect-to-https
           LambdaFunctionAssociations:
             !If
-            - ShouldUseIndexHtmlRewriteLambda
+            - ShouldUseSiteRequestHandlerLambda
             -
               -
                 EventType: origin-request # Execute only when CF forwards a request to S3 origin. Does not execute if it's already cached.
-                LambdaFunctionARN: !Ref VersionedUrlRewriteLambda
+                LambdaFunctionARN: !Ref VersionedSiteRequestHandlerLambda
             - !Ref "AWS::NoValue"
         PriceClass: !Ref CloudFrontPriceClass
         ViewerCertificate:
@@ -204,33 +246,61 @@ Resources:
             EvaluateTargetHealth: false
             HostedZoneId: Z2FDTNDATAQYW2 # Static CloudFront distribution zone https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-route53-aliastarget.html#cfn-route53-aliastarget-hostedzoneid
 
-  VersionedUrlRewriteLambda:
+  VersionedSiteRequestHandlerLambda:
     Type: 'AWS::Lambda::Version'
-    Condition: ShouldUseIndexHtmlRewriteLambda
+    Condition: ShouldUseSiteRequestHandlerLambda
     Properties:
-      FunctionName: !Ref UrlRewriteLambda
+      FunctionName: !Ref SiteRequestHandlerLambda
 
-  UrlRewriteLambda:  # We use shorter names to allow longer stack names (stackname+rolename cannot reach 50 chars with managed names) & IAM rules work with stack prefix
+  SiteRequestHandlerLambda:  # We use shorter names to allow longer stack names (stackname+rolename cannot reach 50 chars with managed names) & IAM rules work with stack prefix
     Type: AWS::Lambda::Function
-    Condition: ShouldUseIndexHtmlRewriteLambda
+    Condition: ShouldUseSiteRequestHandlerLambda
     Properties:
-      Description: Rewrites CloudFront requests from url.com/test to url.com/test/index.html.
-      FunctionName: !Sub ${AWS::StackName}-url-rewrite-lambda # StackName- required for role to function
-      Role: !GetAtt UrlRewriteLambdaRole.Arn
+      Description: >-
+        Lambda@Edge function for handling URL rewrites and redirects for static website hosting.
+      FunctionName: !Sub ${AWS::StackName}-url-modifier-lambda # StackName- required for role to function
+      Role: !GetAtt SiteRequestHandlerLambdaRole.Arn
       Runtime: nodejs20.x
       Handler: index.handler
       MemorySize: 128
       Timeout: 5
+      Environment: !Ref "AWS::NoValue" # Lambda@Edge cannot have environment variables (as future reference) https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-at-edge-function-restrictions.html
       Code:
-        ZipFile: |
+        # index.html rewriting from: https://aws.amazon.com/blogs/compute/implementing-default-directory-indexes-in-amazon-s3-backed-amazon-cloudfront-origins-using-lambdaedge/
+        ZipFile: !Sub |
           'use strict';
-          const pointsToFile = uri => /\/[^/]+\.[^/]+$/.test(uri);
-          exports.handler = (event, context, callback) => {
-              let request = event.Records[0].cf.request; // Extract the request from the CloudFront event that is sent to Lambda@Edge
-              var oldUri = request.uri;
-            // Redirect redirects to urls with trailing slashes 
-              if (!pointsToFile(oldUri) && !oldUri.endsWith('/')) {
-                const newUri = request.querystring ? `${oldUri}/?${request.querystring}` : `${oldUri}/`;
+
+          const options = {
+            shouldForceTrailingSlash: ${ForceTrailingSlash},
+            shouldRemoveTrailingSlash: ${ForceRemoveTrailingSlash},
+            shouldRewriteWithIndexHtml: ${UseIndexHtmlRewrite},
+            shouldRewriteToPathHtml: ${UsePathHtmlRewrite},
+          };
+          if (
+            options.shouldForceTrailingSlash
+            && options.shouldRemoveTrailingSlash
+          ) {
+            throw new Error('Conflicting options: Mutually exclusive slash behavior');
+          }
+          if (
+            !options.shouldForceTrailingSlash
+            && !options.shouldRemoveTrailingSlash
+            && !options.shouldRewriteWithIndexHtml
+            && !options.shouldRewriteToPathHtml
+          ) {
+            throw new Error('All options are false. No action needed.');
+          }
+
+          const pointsToFile = (uri) => /\/[^/]+\.[^/]+$/.test(uri);
+          exports.handler = (event, _context, callback) => {
+            try {
+              console.log('Handling request. Options:', options);
+
+              const request = event.Records[0].cf.request; // Request to CloudFront
+              const requestUri = request.uri;
+
+              const respondRedirect = (redirectToUri) => {
+                console.log('Redirect:', 'Request:', requestUri, 'Redirect:', redirectToUri);
                 return callback(null, {
                   body: '',
                   status: '301',
@@ -238,26 +308,85 @@ Resources:
                   headers: {
                     location: [{
                       key: 'Location',
-                      value: newUri,
+                      value: redirectToUri,
                     }],
                   }
                 });
+              };
+
+              const withNewBackendRequestUri = (newUri) => {
+                console.log('URI rewrite. New:', newUri, 'Original:', requestUri);
+                request.uri = newUri;
+                return callback(null, request);
               }
-              const newUri = oldUri.replace(/\/$/, '\/index.html'); // Match any '/' that occurs at the end of a URI. Replace it with a default index 
-              console.log("Old URI: " + oldUri);
-              console.log("New URI: " + newUri);
-              request.uri = newUri; // Replace the received URI with the URI that includes the index page
-              return callback(null, request); // Return to CloudFront
+
+              const addQueryString = (uri) => (request.querystring || '').length > 0
+                ? uri + '?' + request.querystring
+                : uri;
+
+              if (
+                options.shouldForceTrailingSlash
+                && !pointsToFile(requestUri)
+                && !requestUri.endsWith('/')) {
+                return respondRedirect(
+                  addQueryString(
+                    requestUri + '/',
+                  ),
+                );
+              }
+
+              if (
+                options.shouldRemoveTrailingSlash
+                  && requestUri.endsWith('/')
+                  && requestUri !== '/'
+              ) {
+                return respondRedirect(
+                  addQueryString(
+                    requestUri
+                        .replace(/\/\//g, '/') // Prevent open redirect by replacing double slashes with single slash
+                        .slice(0, -1) // Remove trailing slash
+                  ),
+                );
+              }
+              if (
+                options.shouldRewriteToPathHtml
+                  && !pointsToFile(requestUri)
+                  && !requestUri.endsWith('/')
+              ) {
+                return withNewBackendRequestUri(
+                  requestUri + '.html',
+                );
+              }
+              if (
+                options.shouldRewriteWithIndexHtml
+                  && (requestUri.endsWith('/') || !pointsToFile(requestUri))
+              ) {
+                return withNewBackendRequestUri(
+                  requestUri.endsWith('/')
+                    ? requestUri + 'index.html'
+                    : requestUri + '/index.html'
+                );
+              }
+              return callback(null, request); // Return unmodified
+            } catch (e) {
+              console.error(e);
+              return callback(null, {
+                body: 'Lambda failed: ' + e.message,
+                status: '500',
+                statusDescription: 'Internal Server Error',
+                headers: {},
+              });
+            };
           };
       Tags: 
         -
           Key: Application
           Value: !Ref RootDomainName
         
-  UrlRewriteLambdaRole:
+  SiteRequestHandlerLambdaRole:
     Type: 'AWS::IAM::Role'
     Properties:
-      Description: Execution role for UrlRewriteLambda
+      Description: Execution role for SiteRequestHandlerLambda
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:

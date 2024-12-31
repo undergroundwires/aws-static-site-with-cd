@@ -88,16 +88,23 @@ jobs:
         #   - In "parameter-overrides":
         #     - "CertificateStackName": put the same name you've decided in previous stacks, e.g. namethatsnotlonger-cert-stack
         #     - "DnsStackName": put the same name you've decided in previous stacks, e.g. namethatsnotlonger-dns-stack
-        #     - "UseIndexHtmlRewriteLambda": Look for "xx.com/xx/test.html" in bucket when "xx.com/xx/" is requested.
+        #     - "UseIndexHtmlRewrite": Look for "xx.com/xx/test.html" in bucket when "xx.com/xx/" is requested.
         #     - "RootDomainName": update it to match your root domain e.g. google.com [without http(s) and www]
         #     - "UseDeepLinks": (optional) its value can be true or false, its for SPA websites with own router e.g. Angular/Vue/React 
+        #     - "ForceRemoveTrailingSlash": (optional) Redirects URLs ending with slash to URLs without slash
+        #     - "ForceTrailingSlash": (optional) Redirects URLs without slash at the end to URLs with slash at the end
         #     - "404Page": (optional) 404 page to return if page does not exist, does not work with UseDeepLinks
         run: >-
           bash "scripts/deploy/deploy-stack.sh" \
             --template-file stacks/web-stack.yaml \
             --stack-name privacysexy-web-stack \
-            --parameter-overrides "CertificateStackName=privacysexy-cert-stack DnsStackName=privacysexy-dns-stack \
-                                   RootDomainName=privacy.sexy UseIndexHtmlRewriteLambda=true 404Page=/404.html" \
+            --parameter-overrides "\
+              CertificateStackName=privacysexy-cert-stack \
+              DnsStackName=privacysexy-dns-stack \
+              RootDomainName=privacy.sexy \
+              UseIndexHtmlRewrite=true \
+              404Page=/404.html \
+            " \
             --capabilities CAPABILITY_IAM \
             --region us-east-1 \
             --role-arn ${{secrets.AWS_WEB_STACK_DEPLOYMENT_ROLE_ARN}} \

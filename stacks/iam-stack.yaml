@@ -387,6 +387,7 @@ Resources: # Granularity cheatsheet: https://iam.cloudonaut.io/
               - cloudfront:DeleteDistribution
               - cloudfront:UpdateDistribution
               - cloudfront:GetDistribution
+              - cloudfront:ListTagsForResource
               - cloudfront:TagResource
               - cloudfront:UpdateCloudFrontOriginAccessIdentity
             Resource: !Sub arn:aws:cloudfront::${AWS::AccountId}:* # arn:aws:cloudfront::$account-id:*
@@ -435,6 +436,8 @@ Resources: # Granularity cheatsheet: https://iam.cloudonaut.io/
               - lambda:ListTags
               - lambda:TagResource
               - lambda:UntagResource
+              - lambda:UpdateFunctionCode
+              - lambda:UpdateFunctionConfiguration
             Resource:
               - !Sub arn:aws:lambda:*:${AWS::AccountId}:function:${WebStackName}-* # arn:aws:lambda:$region:$account:function:$function-name
           -
@@ -446,7 +449,9 @@ Resources: # Granularity cheatsheet: https://iam.cloudonaut.io/
               - lambda:PublishVersion # we cannot assign lambdas, we must assign versions
             Resource: !Sub arn:aws:lambda:*:${AWS::AccountId}:function:${WebStackName}-*  # arn:aws:lambda:$region:$account:function:$function-name
           -
-            Sid: AllowCreatingServiceLinkedRoles # https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-edge-permissions.html#lambda-edge-permissions-required
+            Sid: AllowCreatingServiceLinkedRoles
+            # Needed for Lambda@Edge
+            # https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-edge-permissions.html#lambda-edge-permissions-required
             Effect: Allow
             Action:
               - iam:CreateServiceLinkedRole
