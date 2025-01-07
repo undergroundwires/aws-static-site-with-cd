@@ -56,6 +56,8 @@ jobs:
             --role-arn-dns            '${{ secrets.AWS_DNS_STACK_DEPLOYMENT_ROLE_ARN }}' \
             --role-arn-cert           '${{ secrets.AWS_CERTIFICATE_STACK_DEPLOYMENT_ROLE_ARN }}' \
             --role-arn-web            '${{ secrets.AWS_WEB_STACK_DEPLOYMENT_ROLE_ARN }}' \
+            --role-arn-cf             '${{ secrets.AWS_CLOUDFRONT_SITE_DEPLOYMENT_ROLE_ARN }}' \
+            --role-arn-s3-upload      '${{ secrets.AWS_S3_SITE_DEPLOYMENT_ROLE_ARN }}' \
             --use-index-html-rewrite  'true' \
-            --404-page)               '/404.html'
+            --404-page                '/404.html'
         working-directory: aws

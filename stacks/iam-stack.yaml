@@ -18,7 +18,7 @@ Parameters:
     Type: String
     Description: Name of the certificate stack, e.g. namethatsnotlonger-cert-stack.
 
-Resources: # Granularity cheatsheet: https://iam.cloudonaut.io/
+Resources: # Granularity cheatsheet: https://docs.aws.amazon.com/service-authorization/latest/reference/reference_policies_actions-resources-contextkeys.html
 
   # -----------------------------
   # ------ User & Groups --------
@@ -147,26 +147,50 @@ Resources: # Granularity cheatsheet: https://iam.cloudonaut.io/
             Value: !Ref RootDomainName
         ManagedPolicyArns:
           - !Ref S3SiteDeployPolicy
-          - !Ref StackExportReaderPolicy
+          - !Ref WebStackExportReaderPolicy
 
-  CFAppDeployRole: # We use shorter name ("CF") to allow longer stack names (stackname+rolename cannot reach 50 chars with managed names) & IAM rules work with stack prefix
-      Type: 'AWS::IAM::Role'
-      Properties:
-        Description: "Allows to informs to CloudFront to renew its cache from S3"
-        AssumeRolePolicyDocument:
-          Statement:
-            -
-              Effect: Allow
-              Principal:
-                AWS: !GetAtt DeploymentUser.Arn
-              Action: sts:AssumeRole
-        Tags:
+  CFAppDeployRole:
+    # We use shorter name ("CF") to allow longer stack names (stackname+rolename cannot reach 50 chars with managed names)
+    # and IAM rules work with stack prefix.
+    Type: 'AWS::IAM::Role'
+    Properties:
+      Description: "Allows to inform CloudFront to renew its cache from S3"
+      AssumeRolePolicyDocument:
+        Statement:
           -
-            Key: Application
-            Value: !Ref RootDomainName
-        ManagedPolicyArns:
-          - !Ref CloudFrontInvalidationPolicy
-          - !Ref StackExportReaderPolicy
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt DeploymentUser.Arn
+            Action: sts:AssumeRole
+      Tags:
+        -
+          Key: Application
+          Value: !Ref RootDomainName
+      ManagedPolicyArns:
+        - !Ref CloudFrontInvalidationPolicy
+        - !Ref WebStackExportReaderPolicy
+
+  CFLambdaSyncRole:
+      # We use shorter name ("CF") to allow longer stack names (stackname+rolename cannot reach 50 chars with managed names)
+      # and IAM rules work with stack prefix.
+    Type: 'AWS::IAM::Role'
+    Properties:
+      Description: "Allows to update Lambda@Edge version on CloudFront"
+      AssumeRolePolicyDocument:
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt DeploymentUser.Arn
+            Action: sts:AssumeRole
+      Tags:
+        -
+          Key: Application
+          Value: !Ref RootDomainName
+      ManagedPolicyArns:
+        - !Ref WebStackExportReaderPolicy
+        - !Ref CloudFrontReadWriteDistributionConfigPolicy
+        - !Ref WebStackLambdaEdgePublishVersionPolicy
 
   # --------------------------------
   # ----------- Policies -----------
@@ -240,6 +264,8 @@ Resources: # Granularity cheatsheet: https://iam.cloudonaut.io/
             Action:
               - iam:CreateRole
               - iam:DeleteRole
+              - iam:UpdateRoleDescription
+              - iam:TagRole
             Resource:
               - !Sub arn:aws:iam::${AWS::AccountId}:role/${AWS::StackName}-* # arn:aws:iam::$account:role/$role-name
 
@@ -517,10 +543,61 @@ Resources: # Granularity cheatsheet: https://iam.cloudonaut.io/
               - cloudfront:CreateInvalidation
             Resource: "*" # Does not support resource-level permissions https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/cf-api-permissions-ref.html
 
-  StackExportReaderPolicy:
+  CloudFrontReadWriteDistributionConfigPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
-      Description: !Sub allows creating invalidations on CloudFront in ${WebStackName}
+      Description: Allows reading/writing to CloudFront distribution configurations
+      # ManagedPolicyName: Commented out because CloudFormation requires to rename when replacing custom-named resource
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Sid: AllowCloudFrontConfigRead
+            Effect: Allow
+            Action:
+              - cloudfront:GetDistributionConfig
+            Resource: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/*
+            Condition:
+              StringEquals:
+                'aws:ResourceTag/Application': !Ref RootDomainName
+          -
+            Sid: AllowCloudFrontConfigWrite
+            Effect: Allow
+            Action:
+              - cloudfront:UpdateDistribution
+            Resource: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/*
+            Condition:
+              StringEquals:
+                'aws:ResourceTag/Application': !Ref RootDomainName
+          -
+            Sid: AllowCloudFrontConfigWriteLambdaAssociation
+            Effect: Allow
+            Action:
+              - lambda:GetFunction
+              - lambda:EnableReplication*
+            Resource: !Sub arn:aws:lambda:*:${AWS::AccountId}:function:${WebStackName}-*  # arn:aws:lambda:$region:$account:function:$function-name
+
+
+  WebStackLambdaEdgePublishVersionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Allows publishing new Lambda versions
+      # ManagedPolicyName: Commented out because CloudFormation requires to rename when replacing custom-named resource
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Sid: AllowCreatingLambdaFunctionVersions
+            Effect: Allow
+            Action:
+              - lambda:PublishVersion
+            Resource:
+              - !Sub arn:aws:lambda:*:${AWS::AccountId}:function:${WebStackName}-* # arn:aws:lambda:$region:$account:function:$function-name
+
+  WebStackExportReaderPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: !Sub Allows reading exports from ${WebStackName}
       # ManagedPolicyName: Commented out because CloudFormation requires to rename when replacing custom-named resource
       PolicyDocument:
         Version: 2012-10-17
@@ -553,6 +630,10 @@ Outputs:
     Description: "Secret name: AWS_S3_SITE_DEPLOYMENT_ROLE_ARN"
     Value: !GetAtt S3AppDeployRole.Arn
 
-  CFAppDeployRoleArn:  # To be used by the deploy tool
+  CFCacheInvalidateRoleArn:  # To be used by the deploy tool
     Description: "Secret name: AWS_CLOUDFRONT_SITE_DEPLOYMENT_ROLE_ARN"
     Value: !GetAtt CFAppDeployRole.Arn
+
+  CFLambdaSyncRoleArn:  # To be used by the deploy tool
+    Description: "Secret name: AWS_CLOUDFRONT_LAMBDA_SYNC_ROLE_ARN"
+    Value: !GetAtt CFLambdaSyncRole.Arn

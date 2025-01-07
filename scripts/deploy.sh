@@ -13,7 +13,8 @@ while [[ "$#" -gt 0 ]]; do case $1 in
   --role-arn-dns)                   ROLE_ARN_DNS="$2";shift;;                   # Required, output from IAM stack
   --role-arn-cert)                  ROLE_ARN_CERT="$2";shift;;                  # Required, output from IAM stack
   --role-arn-web)                   ROLE_ARN_WEB="$2";shift;;                   # Required, output from IAM stack
-  --role-arn-cf)                    ROLE_ARN_CF="$2";shift;;                    # Required, output from IAM stack
+  --role-arn-cf-lambda-sync)        ROLE_ARN_CF_LAMBDA_SYNC="$2";shift;;        # Required, output from IAM stack
+  --role-arn-cf-invalidate)         ROLE_ARN_CF_INVALIDATE="$2";shift;;         # Required, output from IAM stack
   --role-arn-s3-upload)             ROLE_ARN_S3_UPLOAD="$2";shift;;             # Required, output from IAM stack
   --use-index-html-rewrite)         USE_INDEX_HTML_REWRITE="$2";shift;;         # Optional
   --404-page)                       PAGE_404="$2";shift;;                       # Optional
@@ -24,19 +25,20 @@ while [[ "$#" -gt 0 ]]; do case $1 in
 esac; shift; done
 
 # Verify parameters
-if [ -z "$ACCESS_KEY_ID" ];         then echo 'Access key ID is not set';                               exit 1; fi;
-if [ -z "$SECRET_ACCESS_KEY" ];     then echo 'Secret access key is not set.';                          exit 1; fi;
-if [ -z "$REGION" ];                then echo 'Region is not set.';                                     exit 1; fi;
-if [ -z "$ROOT_DOMAIN" ];           then echo 'Root domain is not set.';                                exit 1; fi;
-if [ -z "$RESOURCE_PREFIX" ];       then echo 'Resource prefix is not set.';                            exit 1; fi;
-if [ -z "$SITE_DIST_DIR" ];         then echo 'Site dist dir (build artifacts) is not set.';            exit 1; fi;
-if [ -z "$SESSION_NAME" ];          then echo 'Session name is not set.';                               exit 1; fi;
-if [ -z "$ROLE_ARN_IAM" ];          then echo 'Role ARN for IAM stack is not set.';                     exit 1; fi;
-if [ -z "$ROLE_ARN_DNS" ];          then echo 'Role ARN for DNS stack is not set.';                     exit 1; fi;
-if [ -z "$ROLE_ARN_CERT" ];         then echo 'Role ARN for cert stack is not set.';                    exit 1; fi;
-if [ -z "$ROLE_ARN_WEB" ];          then echo 'Role ARN for WEB stack is not set.';                     exit 1; fi;
-if [ -z "$ROLE_ARN_CF" ];           then echo 'Role ARN for CloudFront invalidation is not set.';       exit 1; fi;
-if [ -z "$ROLE_ARN_S3_UPLOAD" ];    then echo 'Role ARN for S3 site deployment is not set.';            exit 1; fi;
+if [ -z "$ACCESS_KEY_ID" ];             then echo 'Access key ID is not set';                               exit 1; fi;
+if [ -z "$SECRET_ACCESS_KEY" ];         then echo 'Secret access key is not set.';                          exit 1; fi;
+if [ -z "$REGION" ];                    then echo 'Region is not set.';                                     exit 1; fi;
+if [ -z "$ROOT_DOMAIN" ];               then echo 'Root domain is not set.';                                exit 1; fi;
+if [ -z "$RESOURCE_PREFIX" ];           then echo 'Resource prefix is not set.';                            exit 1; fi;
+if [ -z "$SITE_DIST_DIR" ];             then echo 'Site dist dir (build artifacts) is not set.';            exit 1; fi;
+if [ -z "$SESSION_NAME" ];              then echo 'Session name is not set.';                               exit 1; fi;
+if [ -z "$ROLE_ARN_IAM" ];              then echo 'Role ARN for IAM stack is not set.';                     exit 1; fi;
+if [ -z "$ROLE_ARN_DNS" ];              then echo 'Role ARN for DNS stack is not set.';                     exit 1; fi;
+if [ -z "$ROLE_ARN_CERT" ];             then echo 'Role ARN for cert stack is not set.';                    exit 1; fi;
+if [ -z "$ROLE_ARN_WEB" ];              then echo 'Role ARN for WEB stack is not set.';                     exit 1; fi;
+if [ -z "$ROLE_ARN_CF_INVALIDATE" ];    then echo 'Role ARN for CloudFront invalidation is not set.';       exit 1; fi;
+if [ -z "$ROLE_ARN_CF_LAMBDA_SYNC" ];   then echo 'Role ARN for CloudFront Lambda@Edge sync is not set.';   exit 1; fi;
+if [ -z "$ROLE_ARN_S3_UPLOAD" ];        then echo 'Role ARN for S3 site deployment is not set.';            exit 1; fi;
 if [[ ! -d "$SITE_DIST_DIR" ]]; then
     echo "Error: Site distribution directory '$SITE_DIST_DIR' does not exist"
     exit 1
@@ -47,9 +49,9 @@ set -e # Abort the script if any command fails
 readonly SCRIPT_PATH="$(cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 readonly PROJECT_ROOT="$(dirname "$SCRIPT_PATH")"
 
-echo '-----------------------------'
-echo '---Create AWS user profile---'
-echo '-----------------------------'
+echo '--------------------------------'
+echo '----Create AWS user profile-----'
+echo '--------------------------------'
 readonly PROFILE_NAME='user'
 bash "$PROJECT_ROOT/scripts/configure/create-user-profile.sh" \
     --profile "$PROFILE_NAME" \
@@ -57,9 +59,9 @@ bash "$PROJECT_ROOT/scripts/configure/create-user-profile.sh" \
     --secret-access-key "$SECRET_ACCESS_KEY" \
     --region "$REGION"
 
-echo '-----------------------------'
-echo '-------Deploy IAM stack------'
-echo '-----------------------------'
+echo '--------------------------------'
+echo '--------Deploy IAM stack--------'
+echo '--------------------------------'
 readonly IAM_STACK_NAME="$RESOURCE_PREFIX-iam-stack"
 readonly WEB_STACK_NAME="$RESOURCE_PREFIX-web-stack"
 readonly DNS_STACK_NAME="$RESOURCE_PREFIX-dns-stack"
@@ -79,9 +81,9 @@ bash "$PROJECT_ROOT/scripts/deploy/deploy-stack.sh" \
     --profile "$PROFILE_NAME" \
     --session "$SESSION_NAME"
 
-echo '-----------------------------'
-echo '------Deploy DNS stack-------'
-echo '-----------------------------'
+echo '--------------------------------'
+echo '--------Deploy DNS stack--------'
+echo '--------------------------------'
 bash "$PROJECT_ROOT/scripts/deploy/deploy-stack.sh" \
     --template-file "$PROJECT_ROOT/stacks/dns-stack.yaml" \
     --stack-name "$DNS_STACK_NAME" \
@@ -93,9 +95,9 @@ bash "$PROJECT_ROOT/scripts/deploy/deploy-stack.sh" \
     --profile "$PROFILE_NAME" \
     --session "$SESSION_NAME"
 
-echo '-----------------------------'
-echo '--Deploy certificate stack---'
-echo '-----------------------------'
+echo '--------------------------------'
+echo '----Deploy certificate stack----'
+echo '--------------------------------'
 # It must be deployed in us-east-1, see: https://repost.aws/knowledge-center/cloudfront-invalid-viewer-certificate
 bash "$PROJECT_ROOT/scripts/deploy/deploy-stack.sh" \
     --template-file "$PROJECT_ROOT/stacks/certificate-stack.yaml" \
@@ -109,9 +111,9 @@ bash "$PROJECT_ROOT/scripts/deploy/deploy-stack.sh" \
     --profile "$PROFILE_NAME" \
     --session "$SESSION_NAME"
 
-echo '-----------------------------'
-echo '------Deploy web stack-------'
-echo '-----------------------------'
+echo '--------------------------------'
+echo '--------Deploy web stack--------'
+echo '--------------------------------'
 params=(
     "CertificateStackName=$CERT_STACK_NAME"
     "DnsStackName=$DNS_STACK_NAME"
@@ -132,9 +134,20 @@ bash "$PROJECT_ROOT/scripts/deploy/deploy-stack.sh" \
     --profile "$PROFILE_NAME" \
     --session "$SESSION_NAME"
 
-echo '-----------------------------'
-echo '--------Deploy to S3---------'
-echo '-----------------------------'
+echo '--------------------------------'
+echo '-Sync CloudFront Lambda version-'
+echo '--------------------------------'
+bash "$PROJECT_ROOT/scripts/deploy/sync-cloudfront-lambda-version.sh" \
+    --profile "$PROFILE_NAME" \
+    --role-arn "$ROLE_ARN_CF_LAMBDA_SYNC" \
+    --session "$SESSION_NAME" \
+    --region "$REGION" \
+    --web-stack-name "$WEB_STACK_NAME" \
+    --web-stack-cloudfront-arn-output-name CloudFrontDistributionArn
+
+echo '--------------------------------'
+echo '----------Deploy to S3----------'
+echo '--------------------------------'
 bash "$PROJECT_ROOT/scripts/deploy/deploy-to-s3.sh" \
     --folder "$SITE_DIST_DIR" \
     --web-stack-name "$WEB_STACK_NAME" \
@@ -145,14 +158,14 @@ bash "$PROJECT_ROOT/scripts/deploy/deploy-to-s3.sh" \
     --profile "$PROFILE_NAME" \
     --session "$SESSION_NAME"
 
-echo '-----------------------------'
-echo '-Invalidate CloudFront cache-'
-echo '-----------------------------'
+echo '--------------------------------'
+echo '--Invalidate CloudFront cache---'
+echo '--------------------------------'
 bash "$PROJECT_ROOT/scripts/deploy/invalidate-cloudfront-cache.sh" \
     --paths "/*" \
     --web-stack-name "$WEB_STACK_NAME" \
     --web-stack-cloudfront-arn-output-name CloudFrontDistributionArn \
-    --role-arn "$ROLE_ARN_CF" \
+    --role-arn "$ROLE_ARN_CF_INVALIDATE" \
     --region "$REGION" \
     --profile "$PROFILE_NAME" \
     --session "$SESSION_NAME"

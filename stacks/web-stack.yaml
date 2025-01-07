@@ -206,7 +206,7 @@ Resources:
             - !Ref "AWS::NoValue"
       Tags:
         -
-          Key: Application
+          Key: Application # This tag is important for IAM roles
           Value: !Ref RootDomainName
 
   CloudFrontDNSRecords:

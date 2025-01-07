@@ -418,6 +418,8 @@ It'll make a CORS request to function. So S3 only allows the website itself to d
     Synchronizes given folder with the given S3 bucket using given storage class.
   - [`deploy/invalidate-cloudfront-cache.sh`](./scripts/deploy/invalidate-cloudfront-cache.sh):
     Invalidates cache on root level so the site is up again.
+  - [`deploy/sync-cloudfront-lambda-version.sh`](./scripts/deploy/sync-cloudfront-lambda-version.sh):
+    Ensures CloudFront uses the latest Lambda@Edge code/configuration, overcoming CloudFormation limitations.
   - [`configure/create-user-profile.sh`](./scripts/configure/create-user-profile.sh):
     Creates AWS profile for the build user.
 - See [example use case](#extending-records-to-use-e-mail) for how to use deeper scripts.
