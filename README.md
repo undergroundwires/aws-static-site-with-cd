@@ -50,7 +50,7 @@ This setup has different goals that makes difference from other static website s
    1. Deploy `dns-stack.yaml`.
    2. [Configure custom domain registrar](#configure-your-domain-registrar)
    3. Deploy `certificate-stack.yaml`
-      - Must be in  `us-east-1` [see certificate stack](#certificate-stack)
+      - Must be in `us-east-1` [see certificate stack](#certificate-stack)
       - Watch the status [here](https://console.aws.amazon.com/acm/home?region=us-east-1#/)
    4. Deploy `web-stack.yaml`
 2. Deploy application
@@ -86,9 +86,9 @@ Estimated time: ☕ 10 min
 
 - Here you'll choose the name for your stack(s)
 - 💡 Recommended: Have a prefix for each stack e.g. `websitename-iam-stack`, `websitename-cert-stack`...
+  - This is required to use [deploy script](./scripts/deploy.sh) for future operations
 - ❗ Double check to ensure you have max `18` chars [^1] (`28` without `iam-stack-` prefix) in your stack name.
   - Otherwise AWS trims the name, and it breaks some policies that gives permissions by the stack name, see [security](#security)
-- Update also names for future stacks in `Parameters`.
 
 [^1]: `64 chars for roles - 14 chars used by AWS - 21 chars longest role name (ResolveCertLambdaRole) + 1 hypens = 28 chars`
 
@@ -120,18 +120,24 @@ Estimated time: ☕ 10 min
 
 ###### Create your build pipeline
 
-- If you use GitHub Actions or Azure Pipelines, you can use the [predefined template](./pipelines/github.yaml) here. Otherwise, configure the steps given there in your build agent. It simply calls bash scripts in [scripts](#deployment-scripts) as would be pretty easy to port anywhere. Feel free to contribute your solution as pull request to [pipelines folder](./pipelines).
+- If you use GitHub Actions or Azure Pipelines, you can use the [predefined template](./pipelines/github.yaml) here.
+  Otherwise, configure the steps given there in your build agent.
+  It deploy script in [scripts](#deployment-scripts) as would be pretty easy to port anywhere.
+  Feel free to contribute your solution as pull request to [pipelines folder](./pipelines).
 - Using the [predefined template](./pipelines/github.yaml) ↘
- - It deploys changes on each push to `master`. You might not want that, you can change the behavior in first lines.
- - In predefined template, you'll see `TODO:` comments stating where you should customize the steps. Update those! See reference for [a node application privacy.sexy here](https://github.com/undergroundwires/privacy.sexy/blob/master/.github/workflows/build-and-deploy.yaml).
+  - It deploys changes on each push to `master`.
+    You may not want to do that, you can change the behavior in first lines.
+  - In predefined template, you'll see `TODO:` comments stating where you should customize the steps.
+    Update those!
+    See reference for [a Node application privacy.sexy here](https://github.com/undergroundwires/privacy.sexy/blob/master/.github/workflows/release.site.yaml).
 
 ##### Run the deployment
 
 - If you use Route53 as your domain registrar, you've completed setting up the deployments!
 - ❗ [Configure your domain registrar](#configure-your-domain-registrar).
- - **Web stack may fail** after DNS stack because you need to validate your domain.
-   - Once validated, delete the failed stack in [CloudFormation](https://console.aws.amazon.com/cloudformation/home) & re-run your deployment pipeline.
- - 💡 You can watch certificate status on [ACM](https://console.aws.amazon.com/acm/home) after configuring your registrar.
+  - **Web stack may fail** after DNS stack because you need to validate your domain.
+    - Once validated, delete the failed stack in [CloudFormation](https://console.aws.amazon.com/cloudformation/home) & re-run your deployment pipeline.
+  - 💡 You can watch certificate status on [ACM](https://console.aws.amazon.com/acm/home) after configuring your registrar.
 
 [↑](#get-started)
 
@@ -247,11 +253,13 @@ Vulnerability scans runs also periodically each month to check against latest kn
 
 ### CloudFormation
 
-- AWS infrastructure is defined as code in four different layers
-- Cross stacks pattern is chosen instead of single stack or nested stacks because:
-  - Easier to test & maintain & smaller files and different lifecycles for different areas.
-  - It allows to deploy web bucket in different region than others as other stacks are global (`us-east-1`) resources.
-- All stacks will tag their resources using `RootDomainName` parameter.
+- Everything is orchestrated by the [deploy script](#deployment-scripts) to make it easy to use.
+- Behind the scenes:
+  - AWS infrastructure is defined as code in four different layers
+  - Cross stacks pattern is chosen instead of single stack or nested stacks because:
+    - Easier to test & maintain & smaller files and different lifecycles for different areas.
+    - It allows to deploy web bucket in different region than others as other stacks are global (`us-east-1`) resources.
+  - All stacks will tag their resources using `RootDomainName` parameter.
 
 [↑](#get-started)
 
@@ -400,13 +408,19 @@ It'll make a CORS request to function. So S3 only allows the website itself to d
 
 ### Deployment scripts
 
-- ❗ Prerequisite: [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html)
-- Scripts:
-  - `configure/create-user-profile.sh`: Creates AWS profile for the build user.
-  - `deploy/deploy-stack.sh`: validates & deploys given CloudFormation stack.
-  - `deploy/deploy-to-s3.sh`: Synchronizes given folder with the given S3 bucket using given storage class.
-  - `deploy/invalidate-cloudfront-cache.sh`: Invalidates cache on root level so the site is up again.
-- Best way to see their usage in a build pipeline is checking out the [reference pipeline](./pipelines/github.yaml).
+- All scripts are orchestrated by the [**deploy script**](./scripts/deploy.sh) to simplify their usage.
+- Best way to see its usage in a build pipeline is checking out the [reference pipeline](./pipelines/github.yaml).
+- ❗ All scripts require: [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html)
+- Deeper level scripts include:
+  - [`deploy/deploy-stack.sh`](./scripts/deploy/deploy-stack.sh):
+    Validates and deploys given CloudFormation stack.
+  - [`deploy/deploy-to-s3.sh`](./scripts/deploy/deploy-to-s3.sh):
+    Synchronizes given folder with the given S3 bucket using given storage class.
+  - [`deploy/invalidate-cloudfront-cache.sh`](./scripts/deploy/invalidate-cloudfront-cache.sh):
+    Invalidates cache on root level so the site is up again.
+  - [`configure/create-user-profile.sh`](./scripts/configure/create-user-profile.sh):
+    Creates AWS profile for the build user.
+- See [example use case](#extending-records-to-use-e-mail) for how to use deeper scripts.
 
 [↑](#get-started)
 
