@@ -7,7 +7,7 @@ Description: |-
 Parameters:
   RootDomainName:
     Type: String
-    Description: The root DNS name of the website e.g. cloudarchitecture.io
+    Description: The root DNS name of the website e.g. privacylearn.com
     AllowedPattern: (?!-)[a-zA-Z0-9-.]{1,63}(?<!-)
     ConstraintDescription: Must be a valid root domain name
   CertificateStackName:
