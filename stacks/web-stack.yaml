@@ -348,6 +348,7 @@ Resources:
                   ),
                 );
               }
+
               if (
                 options.shouldRewriteToPathHtml
                   && !pointsToFile(requestUri)
@@ -357,9 +358,10 @@ Resources:
                   requestUri + '.html',
                 );
               }
+
               if (
                 options.shouldRewriteWithIndexHtml
-                  && (requestUri.endsWith('/') || !pointsToFile(requestUri))
+                  && !pointsToFile(requestUri)
               ) {
                 return withNewBackendRequestUri(
                   requestUri.endsWith('/')
@@ -367,6 +369,7 @@ Resources:
                     : requestUri + '/index.html'
                 );
               }
+
               return callback(null, request); // Return unmodified
             } catch (e) {
               console.error(e);
