@@ -9,10 +9,10 @@ jobs:
     steps:
       - 
         name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - 
         name: Configure python
-        uses: actions/setup-python@v1
+        uses: actions/setup-python@v5
         with:
           python-version: '3.x'
           architecture: 'x64'
@@ -28,7 +28,7 @@ jobs:
     steps:
       - 
         name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - 
         name: Configure spellcheck
         run: sudo apt-get install -y shellcheck
@@ -41,12 +41,12 @@ jobs:
     steps:
       - 
         name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       -
         name: Setup node
-        uses: actions/setup-node@v1
+        uses: actions/setup-node@v4
         with:
-          node-version: '10.x'
+          node-version: 'lts/*'
       -
         name: Install remark
         run: npm install --global remark-cli

@@ -12,14 +12,14 @@ jobs:
       # TODO: Build your site here, following is an example to build NPM application
       # -
       #   name: "App: Checkout"
-      #   uses: actions/checkout@v2
+      #   uses: actions/checkout@v4
       #   with:
       #     path: site
       # -
       #   name: "App: Setup node"
-      #   uses: actions/setup-node@v1
+      #   uses: actions/setup-node@v4
       #   with:
-      #     node-version: '14.x'
+      #     node-version: 'lts/*'
       # -
       #   name: "App: Build"
       #   run: npm install && npm run build
