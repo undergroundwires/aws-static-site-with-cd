@@ -19,6 +19,7 @@ while [[ "$#" -gt 0 ]]; do case $1 in
   --use-index-html-rewrite)         USE_INDEX_HTML_REWRITE="$2";shift;;         # Optional
   --404-page)                       PAGE_404="$2";shift;;                       # Optional
   --use-deep-links)                 USE_DEEP_LINKS="$2";shift;;                 # Optional
+  --use-path-html-rewrite)          USE_PATH_HTML_REWRITE="$2";shift;;          # Optional
   --force-remove-trailing-slash)    FORCE_REMOVE_TRAILING_SLASH="$2";shift;;    # Optional
   --force-trailing-slash)           FORCE_TRAILING_SLASH="$2";shift;;           # Optional
   *) echo "Unknown parameter passed: $1"; exit 1;;
@@ -124,6 +125,7 @@ params=(
 [[ -n "$USE_DEEP_LINKS" ]]                  &&  params+=("UseDeepLinks=$USE_DEEP_LINKS")
 [[ -n "$FORCE_REMOVE_TRAILING_SLASH" ]]     &&  params+=("ForceRemoveTrailingSlash=$FORCE_REMOVE_TRAILING_SLASH")
 [[ -n "$FORCE_TRAILING_SLASH" ]]            &&  params+=("ForceTrailingSlash=$FORCE_TRAILING_SLASH")
+[[ -n "$USE_PATH_HTML_REWRITE" ]]           &&  params+=("UsePathHtmlRewrite=$USE_PATH_HTML_REWRITE")
 bash "$PROJECT_ROOT/scripts/deploy/deploy-stack.sh" \
     --template-file "$PROJECT_ROOT/stacks/web-stack.yaml" \
     --stack-name "$WEB_STACK_NAME" \

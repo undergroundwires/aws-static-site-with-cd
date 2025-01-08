@@ -38,6 +38,7 @@ jobs:
         #     - "--resource-prefix": Rename to use whatever you'd like for stacks/resources, e.g. namethatsnotlonger-iam-stack
         #     - "--root-domain": update it to match your root domain e.g. google.com [without http(s) and www]
         #     - "--use-index-html-rewrite" (optional): Look for "xx.com/xx/test.html" in bucket when "xx.com/xx/" is requested.
+        #     - "--use-path-html-rewrite" (optional): Look for "xx.com/xx.html" in bucket when "xx.com/xx" is requested. 
         #     - "--use-deep-links" (optional): its value can be true or false, its for SPA websites with own router e.g. Angular/Vue/React 
         #     - "--force-remove-trailing-slash" (optional): Redirects URLs ending with slash to URLs without slash
         #     - "--force-trailing-slash" (optional): Redirects URLs without slash at the end to URLs with slash at the end
@@ -45,19 +46,22 @@ jobs:
         name: "Infrastructure: Deploy website"
         run: |-
           bash "scripts/deploy.sh" \
-            --access-key-id           '${{ secrets.AWS_DEPLOYMENT_USER_ACCESS_KEY_ID }}' \
-            --secret-access-key       '${{ secrets.AWS_DEPLOYMENT_USER_SECRET_ACCESS_KEY }}' \
-            --region                  'us-east-1' \
-            --root-domain             'privacy.sexy' \
-            --resource-prefix         'privacysexy' \
-            --site-dist-dir           '${{ github.workspace }}/site/dist' \
-            --session-name            "${{ github.actor }}-${{ github.event_name }}-$(echo ${{ github.sha }} | cut -c1-8)" \
-            --role-arn-iam            '${{ secrets.AWS_IAM_STACK_DEPLOYMENT_ROLE_ARN }}' \
-            --role-arn-dns            '${{ secrets.AWS_DNS_STACK_DEPLOYMENT_ROLE_ARN }}' \
-            --role-arn-cert           '${{ secrets.AWS_CERTIFICATE_STACK_DEPLOYMENT_ROLE_ARN }}' \
-            --role-arn-web            '${{ secrets.AWS_WEB_STACK_DEPLOYMENT_ROLE_ARN }}' \
-            --role-arn-cf             '${{ secrets.AWS_CLOUDFRONT_SITE_DEPLOYMENT_ROLE_ARN }}' \
-            --role-arn-s3-upload      '${{ secrets.AWS_S3_SITE_DEPLOYMENT_ROLE_ARN }}' \
-            --use-index-html-rewrite  'true' \
-            --404-page                '/404.html'
+            --access-key-id                 '${{ secrets.AWS_DEPLOYMENT_USER_ACCESS_KEY_ID }}' \
+            --secret-access-key             '${{ secrets.AWS_DEPLOYMENT_USER_SECRET_ACCESS_KEY }}' \
+            --region                        'us-east-1' \
+            --root-domain                   'privacy.sexy' \
+            --resource-prefix               'privacysexy' \
+            --site-dist-dir                 '${{ github.workspace }}/site/dist' \
+            --session-name                  "${{ github.actor }}-${{ github.event_name }}-$(echo ${{ github.sha }} | cut -c1-8)" \
+            --role-arn-iam                  '${{ secrets.AWS_IAM_STACK_DEPLOYMENT_ROLE_ARN }}' \
+            --role-arn-dns                  '${{ secrets.AWS_DNS_STACK_DEPLOYMENT_ROLE_ARN }}' \
+            --role-arn-cert                 '${{ secrets.AWS_CERTIFICATE_STACK_DEPLOYMENT_ROLE_ARN }}' \
+            --role-arn-web                  '${{ secrets.AWS_WEB_STACK_DEPLOYMENT_ROLE_ARN }}' \
+            --role-arn-cf                   '${{ secrets.AWS_CLOUDFRONT_SITE_DEPLOYMENT_ROLE_ARN }}' \
+            --role-arn-s3-upload            '${{ secrets.AWS_S3_SITE_DEPLOYMENT_ROLE_ARN }}' \
+            --use-index-html-rewrite        'true' \
+            --use-path-html-rewrite         'false' \
+            --force-remove-trailing-slash   'false' \
+            --force-trailing-slash          'false' \
+            --404-page                      '/404.html'
         working-directory: aws
