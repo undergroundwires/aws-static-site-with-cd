@@ -481,6 +481,7 @@ You can always copy the stacks and modify, however then you miss the updates. Th
             - "10 spool.mail.gandi.net."
             - "50 fb.mail.gandi.net."
   ```
+
 - Extend DNS records using a new deployment step e.g.
 
 ```yaml
@@ -495,7 +496,6 @@ You can always copy the stacks and modify, however then you miss the updates. Th
         --profile user --session ${{ env.SESSION_NAME }}
     working-directory: aws
 ```
-
 
 [↑](#get-started)
 
