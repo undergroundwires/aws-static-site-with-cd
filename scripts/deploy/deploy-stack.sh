@@ -37,8 +37,8 @@ bash "${BASH_SOURCE%/*}/../configure/create-role-profile.sh" \
 
 echo Deploying stack "$TEMPLATE_FILE"
 
-[ ! -z "$CAPABILITY_IAM" ] && echo "Capabilities: $CAPABILITY_IAM"
-[ ! -z "$PARAMETERS" ] && echo "Parameters: $PARAMETERS"
+[ -n "$CAPABILITY_IAM" ] && echo "Capabilities: $CAPABILITY_IAM"
+[ -n "$PARAMETERS" ] && echo "Parameters: $PARAMETERS"
 
 aws cloudformation deploy \
     --template-file "$TEMPLATE_FILE" \

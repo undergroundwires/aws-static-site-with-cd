@@ -47,127 +47,142 @@ fi
 
 set -e # Abort the script if any command fails
 
-readonly SCRIPT_PATH="$(cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
-readonly PROJECT_ROOT="$(dirname "$SCRIPT_PATH")"
+main() {
+    local -r project_root="$(locate_project_root)"
 
-echo '--------------------------------'
-echo '----Create AWS user profile-----'
-echo '--------------------------------'
-readonly PROFILE_NAME='user'
-bash "$PROJECT_ROOT/scripts/configure/create-user-profile.sh" \
-    --profile "$PROFILE_NAME" \
-    --access-key-id "$ACCESS_KEY_ID" \
-    --secret-access-key "$SECRET_ACCESS_KEY" \
-    --region "$REGION"
+    echo '--------------------------------'
+    echo '----Create AWS user profile-----'
+    echo '--------------------------------'
+    readonly profile_name='user'
+    bash "$project_root/scripts/configure/create-user-profile.sh" \
+        --profile "$profile_name" \
+        --access-key-id "$ACCESS_KEY_ID" \
+        --secret-access-key "$SECRET_ACCESS_KEY" \
+        --region "$REGION"
 
-echo '--------------------------------'
-echo '--------Deploy IAM stack--------'
-echo '--------------------------------'
-readonly IAM_STACK_NAME="$RESOURCE_PREFIX-iam-stack"
-readonly WEB_STACK_NAME="$RESOURCE_PREFIX-web-stack"
-readonly DNS_STACK_NAME="$RESOURCE_PREFIX-dns-stack"
-readonly CERT_STACK_NAME="$RESOURCE_PREFIX-cert-stack"
-bash "$PROJECT_ROOT/scripts/deploy/deploy-stack.sh" \
-    --template-file "$PROJECT_ROOT/stacks/iam-stack.yaml" \
-    --stack-name "$IAM_STACK_NAME" \
-    --capabilities CAPABILITY_IAM \
-    --parameter-overrides "\
-        WebStackName=$WEB_STACK_NAME \
-        DnsStackName=$DNS_STACK_NAME \
-        CertificateStackName=$CERT_STACK_NAME \
-        RootDomainName=$ROOT_DOMAIN \
-    " \
-    --region "$REGION" \
-    --role-arn "$ROLE_ARN_IAM" \
-    --profile "$PROFILE_NAME" \
-    --session "$SESSION_NAME"
+    echo '--------------------------------'
+    echo '--------Deploy IAM stack--------'
+    echo '--------------------------------'
+    readonly iam_stack_name="$RESOURCE_PREFIX-iam-stack"
+    readonly web_stack_name="$RESOURCE_PREFIX-web-stack"
+    readonly dns_stack_name="$RESOURCE_PREFIX-dns-stack"
+    readonly cert_stack_name="$RESOURCE_PREFIX-cert-stack"
+    bash "$project_root/scripts/deploy/deploy-stack.sh" \
+        --template-file "$project_root/stacks/iam-stack.yaml" \
+        --stack-name "$iam_stack_name" \
+        --capabilities CAPABILITY_IAM \
+        --parameter-overrides "\
+            WebStackName=$web_stack_name \
+            DnsStackName=$dns_stack_name \
+            CertificateStackName=$cert_stack_name \
+            RootDomainName=$ROOT_DOMAIN \
+        " \
+        --region "$REGION" \
+        --role-arn "$ROLE_ARN_IAM" \
+        --profile "$profile_name" \
+        --session "$SESSION_NAME"
 
-echo '--------------------------------'
-echo '--------Deploy DNS stack--------'
-echo '--------------------------------'
-bash "$PROJECT_ROOT/scripts/deploy/deploy-stack.sh" \
-    --template-file "$PROJECT_ROOT/stacks/dns-stack.yaml" \
-    --stack-name "$DNS_STACK_NAME" \
-    --parameter-overrides "\
-        RootDomainName=$ROOT_DOMAIN \
-    " \
-    --region "$REGION" \
-    --role-arn "$ROLE_ARN_DNS" \
-    --profile "$PROFILE_NAME" \
-    --session "$SESSION_NAME"
+    echo '--------------------------------'
+    echo '--------Deploy DNS stack--------'
+    echo '--------------------------------'
+    bash "$project_root/scripts/deploy/deploy-stack.sh" \
+        --template-file "$project_root/stacks/dns-stack.yaml" \
+        --stack-name "$dns_stack_name" \
+        --parameter-overrides "\
+            RootDomainName=$ROOT_DOMAIN \
+        " \
+        --region "$REGION" \
+        --role-arn "$ROLE_ARN_DNS" \
+        --profile "$profile_name" \
+        --session "$SESSION_NAME"
 
-echo '--------------------------------'
-echo '----Deploy certificate stack----'
-echo '--------------------------------'
-# It must be deployed in us-east-1, see: https://repost.aws/knowledge-center/cloudfront-invalid-viewer-certificate
-bash "$PROJECT_ROOT/scripts/deploy/deploy-stack.sh" \
-    --template-file "$PROJECT_ROOT/stacks/certificate-stack.yaml" \
-    --stack-name "$CERT_STACK_NAME" \
-    --parameter-overrides "\
-        RootDomainName=$ROOT_DOMAIN \
-        DnsStackName=$DNS_STACK_NAME \
-    " \
-    --region 'us-east-1' \
-    --role-arn "$ROLE_ARN_CERT" \
-    --profile "$PROFILE_NAME" \
-    --session "$SESSION_NAME"
+    echo '--------------------------------'
+    echo '----Deploy certificate stack----'
+    echo '--------------------------------'
+    # It must be deployed in us-east-1, see: https://repost.aws/knowledge-center/cloudfront-invalid-viewer-certificate
+    bash "$project_root/scripts/deploy/deploy-stack.sh" \
+        --template-file "$project_root/stacks/certificate-stack.yaml" \
+        --stack-name "$cert_stack_name" \
+        --parameter-overrides "\
+            RootDomainName=$ROOT_DOMAIN \
+            DnsStackName=$dns_stack_name \
+        " \
+        --region 'us-east-1' \
+        --role-arn "$ROLE_ARN_CERT" \
+        --profile "$profile_name" \
+        --session "$SESSION_NAME"
 
-echo '--------------------------------'
-echo '--------Deploy web stack--------'
-echo '--------------------------------'
-params=(
-    "CertificateStackName=$CERT_STACK_NAME"
-    "DnsStackName=$DNS_STACK_NAME"
-    "RootDomainName=$ROOT_DOMAIN"
-)
-[[ -n "$USE_INDEX_HTML_REWRITE" ]]          &&  params+=("UseIndexHtmlRewrite=$USE_INDEX_HTML_REWRITE")
-[[ -n "$PAGE_404" ]]                        &&  params+=("404Page=$PAGE_404")
-[[ -n "$USE_DEEP_LINKS" ]]                  &&  params+=("UseDeepLinks=$USE_DEEP_LINKS")
-[[ -n "$FORCE_REMOVE_TRAILING_SLASH" ]]     &&  params+=("ForceRemoveTrailingSlash=$FORCE_REMOVE_TRAILING_SLASH")
-[[ -n "$FORCE_TRAILING_SLASH" ]]            &&  params+=("ForceTrailingSlash=$FORCE_TRAILING_SLASH")
-[[ -n "$USE_PATH_HTML_REWRITE" ]]           &&  params+=("UsePathHtmlRewrite=$USE_PATH_HTML_REWRITE")
-bash "$PROJECT_ROOT/scripts/deploy/deploy-stack.sh" \
-    --template-file "$PROJECT_ROOT/stacks/web-stack.yaml" \
-    --stack-name "$WEB_STACK_NAME" \
-    --parameter-overrides "$(IFS=' ' ; echo "${params[*]}")"\
-    --capabilities CAPABILITY_IAM \
-    --region "$REGION" \
-    --role-arn "$ROLE_ARN_WEB" \
-    --profile "$PROFILE_NAME" \
-    --session "$SESSION_NAME"
+    echo '--------------------------------'
+    echo '--------Deploy web stack--------'
+    echo '--------------------------------'
+    params=(
+        "CertificateStackName=$cert_stack_name"
+        "DnsStackName=$dns_stack_name"
+        "RootDomainName=$ROOT_DOMAIN"
+    )
+    [[ -n "$USE_INDEX_HTML_REWRITE" ]]          &&  params+=("UseIndexHtmlRewrite=$USE_INDEX_HTML_REWRITE")
+    [[ -n "$PAGE_404" ]]                        &&  params+=("404Page=$PAGE_404")
+    [[ -n "$USE_DEEP_LINKS" ]]                  &&  params+=("UseDeepLinks=$USE_DEEP_LINKS")
+    [[ -n "$FORCE_REMOVE_TRAILING_SLASH" ]]     &&  params+=("ForceRemoveTrailingSlash=$FORCE_REMOVE_TRAILING_SLASH")
+    [[ -n "$FORCE_TRAILING_SLASH" ]]            &&  params+=("ForceTrailingSlash=$FORCE_TRAILING_SLASH")
+    [[ -n "$USE_PATH_HTML_REWRITE" ]]           &&  params+=("UsePathHtmlRewrite=$USE_PATH_HTML_REWRITE")
+    bash "$project_root/scripts/deploy/deploy-stack.sh" \
+        --template-file "$project_root/stacks/web-stack.yaml" \
+        --stack-name "$web_stack_name" \
+        --parameter-overrides "$(IFS=' ' ; echo "${params[*]}")"\
+        --capabilities CAPABILITY_IAM \
+        --region "$REGION" \
+        --role-arn "$ROLE_ARN_WEB" \
+        --profile "$profile_name" \
+        --session "$SESSION_NAME"
 
-echo '--------------------------------'
-echo '-Sync CloudFront Lambda version-'
-echo '--------------------------------'
-bash "$PROJECT_ROOT/scripts/deploy/sync-cloudfront-lambda-version.sh" \
-    --profile "$PROFILE_NAME" \
-    --role-arn "$ROLE_ARN_CF_LAMBDA_SYNC" \
-    --session "$SESSION_NAME" \
-    --region "$REGION" \
-    --web-stack-name "$WEB_STACK_NAME" \
-    --web-stack-cloudfront-arn-output-name CloudFrontDistributionArn
+    echo '--------------------------------'
+    echo '-Sync CloudFront Lambda version-'
+    echo '--------------------------------'
+    bash "$project_root/scripts/deploy/sync-cloudfront-lambda-version.sh" \
+        --profile "$profile_name" \
+        --role-arn "$ROLE_ARN_CF_LAMBDA_SYNC" \
+        --session "$SESSION_NAME" \
+        --region "$REGION" \
+        --web-stack-name "$web_stack_name" \
+        --web-stack-cloudfront-arn-output-name CloudFrontDistributionArn
 
-echo '--------------------------------'
-echo '----------Deploy to S3----------'
-echo '--------------------------------'
-bash "$PROJECT_ROOT/scripts/deploy/deploy-to-s3.sh" \
-    --folder "$SITE_DIST_DIR" \
-    --web-stack-name "$WEB_STACK_NAME" \
-    --web-stack-s3-name-output-name S3BucketName \
-    --storage-class ONEZONE_IA \
-    --role-arn "$ROLE_ARN_S3_UPLOAD" \
-    --region "$REGION" \
-    --profile "$PROFILE_NAME" \
-    --session "$SESSION_NAME"
+    echo '--------------------------------'
+    echo '----------Deploy to S3----------'
+    echo '--------------------------------'
+    bash "$project_root/scripts/deploy/deploy-to-s3.sh" \
+        --folder "$SITE_DIST_DIR" \
+        --web-stack-name "$web_stack_name" \
+        --web-stack-s3-name-output-name S3BucketName \
+        --storage-class ONEZONE_IA \
+        --role-arn "$ROLE_ARN_S3_UPLOAD" \
+        --region "$REGION" \
+        --profile "$profile_name" \
+        --session "$SESSION_NAME"
 
-echo '--------------------------------'
-echo '--Invalidate CloudFront cache---'
-echo '--------------------------------'
-bash "$PROJECT_ROOT/scripts/deploy/invalidate-cloudfront-cache.sh" \
-    --paths "/*" \
-    --web-stack-name "$WEB_STACK_NAME" \
-    --web-stack-cloudfront-arn-output-name CloudFrontDistributionArn \
-    --role-arn "$ROLE_ARN_CF_INVALIDATE" \
-    --region "$REGION" \
-    --profile "$PROFILE_NAME" \
-    --session "$SESSION_NAME"
+    echo '--------------------------------'
+    echo '--Invalidate CloudFront cache---'
+    echo '--------------------------------'
+    bash "$project_root/scripts/deploy/invalidate-cloudfront-cache.sh" \
+        --paths "/*" \
+        --web-stack-name "$web_stack_name" \
+        --web-stack-cloudfront-arn-output-name CloudFrontDistributionArn \
+        --role-arn "$ROLE_ARN_CF_INVALIDATE" \
+        --region "$REGION" \
+        --profile "$profile_name" \
+        --session "$SESSION_NAME"
+}
+
+locate_project_root() {
+    local script_path
+    if ! script_path="$(cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P)"; then
+        echo 'Could not locate self directory'
+    fi
+    local project_root
+    if ! project_root=$(dirname "$script_path"); then
+        echo 'Could not locate project root'
+    fi
+    echo "$project_root"
+}
+
+main
