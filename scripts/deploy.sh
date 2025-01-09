@@ -107,6 +107,7 @@ main() {
             RootDomainName=$ROOT_DOMAIN \
             DnsStackName=$dns_stack_name \
         " \
+        --capabilities 'CAPABILITY_IAM' \
         --region 'us-east-1' \
         --role-arn "$ROLE_ARN_CERT" \
         --profile "$profile_name" \

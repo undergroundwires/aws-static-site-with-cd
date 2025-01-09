@@ -289,6 +289,8 @@ Resources: # Granularity cheatsheet: https://docs.aws.amazon.com/service-authori
               - lambda:ListTags
               - lambda:TagResource
               - lambda:UntagResource
+              - lambda:UpdateFunctionCode
+              - lambda:UpdateFunctionConfiguration
             Resource:
               - !Sub arn:aws:lambda:*:${AWS::AccountId}:function:${CertificateStackName}-* # arn:aws:lambda:$region:$account:function:$function-name
           -

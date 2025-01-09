@@ -87,7 +87,7 @@ Rules:
           Please enable only one of these options.
 
 Conditions:
-  ShouldUseSiteRequestHandlerLambda:
+  ShouldUseCFSiteRequestLambda:
     !Or 
       - !Equals [true, !Ref UseIndexHtmlRewrite]
       - !Equals [true, !Ref ForceRemoveTrailingSlash]
@@ -175,11 +175,11 @@ Resources:
           ViewerProtocolPolicy: redirect-to-https
           LambdaFunctionAssociations:
             !If
-            - ShouldUseSiteRequestHandlerLambda
+            - ShouldUseCFSiteRequestLambda
             -
               -
                 EventType: origin-request # Execute only when CF forwards a request to S3 origin. Does not execute if it's already cached.
-                LambdaFunctionARN: !Ref VersionedSiteRequestHandlerLambda
+                LambdaFunctionARN: !Ref VersionedCFSiteRequestLambda
             - !Ref "AWS::NoValue"
         PriceClass: !Ref CloudFrontPriceClass
         ViewerCertificate:
@@ -246,20 +246,22 @@ Resources:
             EvaluateTargetHealth: false
             HostedZoneId: Z2FDTNDATAQYW2 # Static CloudFront distribution zone https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-route53-aliastarget.html#cfn-route53-aliastarget-hostedzoneid
 
-  VersionedSiteRequestHandlerLambda:
+  VersionedCFSiteRequestLambda:
     Type: 'AWS::Lambda::Version'
-    Condition: ShouldUseSiteRequestHandlerLambda
+    Condition: ShouldUseCFSiteRequestLambda
     Properties:
-      FunctionName: !Ref SiteRequestHandlerLambda
+      FunctionName: !Ref CFSiteRequestLambda
 
-  SiteRequestHandlerLambda:  # We use shorter names to allow longer stack names (stackname+rolename cannot reach 50 chars with managed names) & IAM rules work with stack prefix
+  CFSiteRequestLambda:
+    # We use shorter names to allow longer stack names (stackname+rolename cannot reach 50 chars with managed names) & IAM rules work with stack prefix
+    # Ensure the name of this resource is not longer than 23 characters
     Type: AWS::Lambda::Function
-    Condition: ShouldUseSiteRequestHandlerLambda
+    Condition: ShouldUseCFSiteRequestLambda
     Properties:
       Description: >-
         Lambda@Edge function for handling URL rewrites and redirects for static website hosting.
       FunctionName: !Sub ${AWS::StackName}-url-modifier-lambda # StackName- required for role to function
-      Role: !GetAtt SiteRequestHandlerLambdaRole.Arn
+      Role: !GetAtt CFSiteRequestLambdaRole.Arn
       Runtime: nodejs20.x
       Handler: index.handler
       MemorySize: 128
@@ -386,10 +388,10 @@ Resources:
           Key: Application
           Value: !Ref RootDomainName
         
-  SiteRequestHandlerLambdaRole:
+  CFSiteRequestLambdaRole:
     Type: 'AWS::IAM::Role'
     Properties:
-      Description: Execution role for SiteRequestHandlerLambda
+      Description: Execution role for CFSiteRequestLambda
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
