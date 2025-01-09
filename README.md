@@ -5,7 +5,7 @@
 [![Contributions are welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/undergroundwires/aws-static-site-with-cd/issues)
 [![Quality checks](https://github.com/undergroundwires/aws-static-site-with-cd/workflows/Quality%20checks/badge.svg)](./.github/workflows/quality-checks.yaml)
 [![Security checks](https://github.com/undergroundwires/aws-static-site-with-cd/workflows/Security%20checks/badge.svg)](./.github/workflows/security-checks.yaml)
-[![Bump version and release](https://github.com/undergroundwires/aws-static-site-with-cd/workflows/Bump%20version%20&%20release/badge.svg)](./.github/workflows/bump-version-and-release.yaml)
+[![Bump version and release](https://github.com/undergroundwires/aws-static-site-with-cd/workflows/bump-version-and-release/badge.svg)](./.github/workflows/bump-version-and-release.yaml)
 [![Auto-versioned by bump-everywhere](https://github.com/undergroundwires/bump-everywhere/blob/master/badge.svg?raw=true)](https://github.com/undergroundwires/bump-everywhere)
 
 - Cheap, secure and fully automated solution to handle your static website deployment to AWS.
